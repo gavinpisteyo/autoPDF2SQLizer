@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 from doc_intel import analyze_document, cache_result, get_cached_result
 from process import extract
+from sql_gen import json_to_sql, generate_create_table
 
 llm = Anthropic()
 
@@ -326,6 +327,82 @@ async def save_as_ground_truth(
         "pdf_path": str(gt_pdf_path),
         "truth_path": str(gt_json_path),
     }
+
+
+# ---------------------------------------------------------------------------
+# SQL Generation & Database Upload
+# ---------------------------------------------------------------------------
+
+@app.post("/api/generate-sql")
+async def api_generate_sql(
+    extracted_json: str = Form(...),
+    table_name: str = Form(...),
+    dialect: str = Form("mssql"),
+    schema_name: str = Form("dbo"),
+    include_ddl: bool = Form(False),
+):
+    """Generate SQL INSERT (and optionally CREATE TABLE) from extracted JSON."""
+    try:
+        data = json.loads(extracted_json)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Invalid JSON")
+
+    sql_parts = []
+    if include_ddl:
+        sql_parts.append(generate_create_table(data, table_name, dialect, schema_name))
+        sql_parts.append("")  # blank line separator
+    sql_parts.append(json_to_sql(data, table_name, dialect, schema_name))
+
+    return {"sql": "\n".join(sql_parts), "dialect": dialect, "table_name": table_name}
+
+
+@app.post("/api/execute-sql")
+async def api_execute_sql(
+    sql: str = Form(...),
+    connection_string: str = Form(...),
+):
+    """Execute SQL against a database. Uses SQLAlchemy for dialect support."""
+    from sqlalchemy import create_engine, text
+
+    try:
+        engine = create_engine(connection_string, connect_args={"timeout": 30})
+    except Exception as e:
+        raise HTTPException(400, f"Invalid connection string: {e}")
+
+    results = []
+    statements = [s.strip() for s in sql.split(";") if s.strip()]
+
+    try:
+        with engine.connect() as conn:
+            for stmt in statements:
+                try:
+                    conn.execute(text(stmt))
+                    results.append({"statement": stmt[:80] + "..." if len(stmt) > 80 else stmt, "status": "ok"})
+                except Exception as e:
+                    results.append({"statement": stmt[:80] + "..." if len(stmt) > 80 else stmt, "status": f"error: {e}"})
+            conn.commit()
+    except Exception as e:
+        raise HTTPException(500, f"Database connection error: {e}")
+    finally:
+        engine.dispose()
+
+    succeeded = sum(1 for r in results if r["status"] == "ok")
+    return {"results": results, "succeeded": succeeded, "total": len(results)}
+
+
+@app.post("/api/test-connection")
+async def api_test_connection(connection_string: str = Form(...)):
+    """Test a database connection."""
+    from sqlalchemy import create_engine, text
+
+    try:
+        engine = create_engine(connection_string, connect_args={"timeout": 10})
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        engine.dispose()
+        return {"status": "ok", "message": "Connection successful"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 # ---------------------------------------------------------------------------

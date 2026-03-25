@@ -8,7 +8,9 @@ dependencies = [
     "azure-ai-documentintelligence>=1.0.0",
     "fastapi>=0.115.0",
     "gunicorn>=22.0.0",
+    "pymssql>=2.2.0",
     "python-dotenv>=1.0.0",
     "python-multipart>=0.0.9",
+    "sqlalchemy>=2.0.0",
     "uvicorn[standard]>=0.30.0",
 ]

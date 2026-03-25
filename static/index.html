@@ -116,6 +116,7 @@
     <div class="tab active" data-panel="extract">Extract</div>
     <div class="tab" data-panel="ground-truth">Ground Truth</div>
     <div class="tab" data-panel="evaluate">Evaluate</div>
+    <div class="tab" data-panel="database">Database</div>
     <div class="tab" data-panel="schemas">Schemas</div>
   </div>
 
@@ -184,6 +185,48 @@
       <button id="eval-btn">Run Evaluation</button>
       <div id="eval-status"></div>
       <div id="eval-result" class="result-box" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- DATABASE -->
+  <div id="database" class="panel">
+    <div class="card">
+      <h2>Connection</h2>
+      <p style="color:var(--muted);font-size:0.8125rem;margin-bottom:1rem;">
+        Configure your database connection. This is used when uploading extracted data.
+      </p>
+      <label>Dialect</label>
+      <select id="db-dialect">
+        <option value="mssql" selected>SQL Server</option>
+        <option value="postgres">PostgreSQL</option>
+        <option value="mysql">MySQL</option>
+      </select>
+      <label>Connection String</label>
+      <input type="text" id="db-conn-str" placeholder="mssql+pymssql://user:pass@server/database">
+      <p style="color:var(--muted);font-size:0.75rem;margin-top:-0.75rem;margin-bottom:1rem;">
+        SQL Server: <code>mssql+pymssql://user:pass@server/database</code><br>
+        PostgreSQL: <code>postgresql://user:pass@host:5432/database</code><br>
+        MySQL: <code>mysql://user:pass@host:3306/database</code>
+      </p>
+      <button id="db-test-btn">Test Connection</button>
+      <div id="db-test-status"></div>
+    </div>
+    <div class="card">
+      <h2>SQL Settings</h2>
+      <div class="row">
+        <div>
+          <label>Target Table Name</label>
+          <input type="text" id="db-table-name" placeholder="e.g. Invoices">
+        </div>
+        <div>
+          <label>Schema / Owner</label>
+          <input type="text" id="db-schema-name" value="dbo">
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin-bottom:1rem;">
+        <input type="checkbox" id="db-include-ddl" style="width:auto;margin:0;">
+        <span>Include CREATE TABLE statement</span>
+      </label>
     </div>
   </div>
 
@@ -324,10 +367,20 @@
             <span class="chevron">&#9654;</span>
           </div>
           <div class="doc-result-body">
-            <textarea style="width:100%;min-height:200px;font-family:'SF Mono',Monaco,Consolas,monospace;font-size:0.8125rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:0.75rem;margin-bottom:0.75rem;"></textarea>
-            <div style="display:flex;gap:0.5rem;align-items:center;">
+            <label style="margin-top:0;">Extracted JSON</label>
+            <textarea class="json-edit" style="width:100%;min-height:200px;font-family:'SF Mono',Monaco,Consolas,monospace;font-size:0.8125rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:0.75rem;margin-bottom:0.75rem;"></textarea>
+            <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
               <button class="save-gt-btn">Save as Ground Truth</button>
+              <button class="gen-sql-btn btn-secondary">Convert to SQL</button>
               <span class="gt-msg" style="font-size:0.8125rem;color:var(--muted);"></span>
+            </div>
+            <div class="sql-section" style="display:none;">
+              <label>Generated SQL</label>
+              <textarea class="sql-edit" style="width:100%;min-height:150px;font-family:'SF Mono',Monaco,Consolas,monospace;font-size:0.8125rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:0.75rem;margin-bottom:0.75rem;"></textarea>
+              <div style="display:flex;gap:0.5rem;align-items:center;">
+                <button class="exec-sql-btn">Upload to Database</button>
+                <span class="sql-msg" style="font-size:0.8125rem;color:var(--muted);"></span>
+              </div>
             </div>
           </div>`;
         resultsList.appendChild(card);
@@ -362,6 +415,55 @@
               msg.style.color = 'var(--success)';
               loadGroundTruth();
             } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--error)'; }
+          });
+
+          // Wire Convert to SQL
+          const sqlBtn = card.querySelector('.gen-sql-btn');
+          const sqlSection = card.querySelector('.sql-section');
+          const sqlEdit = card.querySelector('.sql-edit');
+          const sqlMsg = card.querySelector('.sql-msg');
+
+          sqlBtn.addEventListener('click', async () => {
+            const jsonStr = card.querySelector('.json-edit').value.trim();
+            const tableName = document.getElementById('db-table-name')?.value.trim() || docType;
+            const dialect = document.getElementById('db-dialect')?.value || 'mssql';
+            const schemaName = document.getElementById('db-schema-name')?.value.trim() || 'dbo';
+            const includeDdl = document.getElementById('db-include-ddl')?.checked || false;
+
+            const sfd = new FormData();
+            sfd.append('extracted_json', jsonStr);
+            sfd.append('table_name', tableName);
+            sfd.append('dialect', dialect);
+            sfd.append('schema_name', schemaName);
+            sfd.append('include_ddl', includeDdl);
+
+            try {
+              const sr = await fetch('/api/generate-sql', { method: 'POST', body: sfd });
+              const sd = await sr.json();
+              if (!sr.ok) throw new Error(sd.detail);
+              sqlEdit.value = sd.sql;
+              sqlSection.style.display = 'block';
+            } catch (e) { sqlMsg.textContent = e.message; sqlMsg.style.color = 'var(--error)'; sqlSection.style.display = 'block'; }
+          });
+
+          // Wire Upload to DB
+          card.querySelector('.exec-sql-btn').addEventListener('click', async () => {
+            const connStr = document.getElementById('db-conn-str')?.value.trim();
+            if (!connStr) { sqlMsg.textContent = 'Set connection string in Database tab first'; sqlMsg.style.color = 'var(--warning)'; return; }
+            const sql = sqlEdit.value.trim();
+            if (!sql) return;
+
+            sqlMsg.textContent = 'Uploading...'; sqlMsg.style.color = 'var(--accent)';
+            const sfd = new FormData();
+            sfd.append('sql', sql);
+            sfd.append('connection_string', connStr);
+            try {
+              const sr = await fetch('/api/execute-sql', { method: 'POST', body: sfd });
+              const sd = await sr.json();
+              if (!sr.ok) throw new Error(sd.detail);
+              sqlMsg.textContent = `Done: ${sd.succeeded}/${sd.total} statements succeeded`;
+              sqlMsg.style.color = sd.succeeded === sd.total ? 'var(--success)' : 'var(--warning)';
+            } catch (e) { sqlMsg.textContent = e.message; sqlMsg.style.color = 'var(--error)'; }
           });
         } catch (e) {
           card.querySelector('h3').innerHTML = `${file.name} <span class="badge" style="background:rgba(239,68,68,0.15);color:var(--error);">error</span>`;
@@ -477,6 +579,22 @@
         loadGroundTruth();
       } catch (e) {
         stat.textContent = 'Error: ' + e.message;
+      }
+    });
+
+    // --- Database: test connection ---
+    document.getElementById('db-test-btn').addEventListener('click', async () => {
+      const connStr = document.getElementById('db-conn-str').value.trim();
+      if (!connStr) return setStatus('db-test-status', 'Enter a connection string', 'error');
+      setStatus('db-test-status', 'Testing...', 'loading');
+      const fd = new FormData();
+      fd.append('connection_string', connStr);
+      try {
+        const res = await fetch('/api/test-connection', { method: 'POST', body: fd });
+        const data = await res.json();
+        setStatus('db-test-status', data.message, data.status === 'ok' ? 'success' : 'error');
+      } catch (e) {
+        setStatus('db-test-status', e.message, 'error');
       }
     });
 
