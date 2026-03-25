@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from doc_intel import analyze_document, cache_result, get_cached_result
 from process import extract
 from sql_gen import json_to_sql, generate_create_table
+import knowledge_base as kb
 
 llm = Anthropic()
 
@@ -327,6 +328,65 @@ async def save_as_ground_truth(
         "pdf_path": str(gt_pdf_path),
         "truth_path": str(gt_json_path),
     }
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Base / RAG
+# ---------------------------------------------------------------------------
+
+@app.post("/api/rag/index")
+async def rag_index(
+    customer_id: str = Form(...),
+    doc_type: str = Form(...),
+    extracted_json: str = Form(...),
+    source_file: str = Form(""),
+):
+    """Index extracted data into a customer's knowledge base."""
+    try:
+        data = json.loads(extracted_json)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Invalid JSON")
+
+    result = kb.index_document(customer_id, doc_type, data, source_file)
+    return {
+        "status": "indexed",
+        "customer_id": customer_id,
+        "table": result.table_name,
+        "rows_inserted": result.rows_inserted,
+        "child_tables": result.child_tables,
+    }
+
+
+@app.post("/api/rag/query")
+async def rag_query(
+    customer_id: str = Form(...),
+    question: str = Form(...),
+):
+    """Ask a natural language question about a customer's stored data."""
+    try:
+        result = kb.query(customer_id, question)
+    except Exception as e:
+        raise HTTPException(500, f"Query error: {e}")
+
+    return {
+        "question": result.question,
+        "sql": result.sql_generated,
+        "results": result.raw_results[:50],
+        "answer": result.answer,
+        "error": result.error,
+    }
+
+
+@app.get("/api/rag/customers")
+async def rag_customers():
+    """List all customers with knowledge bases."""
+    return kb.list_customers()
+
+
+@app.get("/api/rag/status/{customer_id}")
+async def rag_status(customer_id: str):
+    """Get knowledge base stats for a customer."""
+    return kb.get_stats(customer_id)
 
 
 # ---------------------------------------------------------------------------

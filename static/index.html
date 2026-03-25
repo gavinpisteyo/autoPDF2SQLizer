@@ -384,6 +384,69 @@
       margin: 0;
       accent-color: var(--silver);
     }
+
+    /* ---- Chat ---- */
+    .chat-log {
+      max-height: 400px;
+      overflow-y: auto;
+      margin-bottom: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .chat-msg {
+      font-size: 0.875rem;
+      line-height: 1.6;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      max-width: 85%;
+    }
+    .chat-msg.user {
+      align-self: flex-end;
+      background: var(--charcoal);
+      color: var(--cloud);
+    }
+    .chat-msg.assistant {
+      align-self: flex-start;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      color: var(--silver);
+    }
+    .chat-msg .sql-preview {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.75rem;
+      background: var(--black);
+      padding: 0.5rem 0.75rem;
+      border-radius: 4px;
+      margin-top: 0.5rem;
+      color: var(--mid);
+      white-space: pre-wrap;
+    }
+    .chat-input-row {
+      display: flex;
+      gap: 0.5rem;
+    }
+    .chat-input-row input {
+      flex: 1;
+      margin-bottom: 0;
+    }
+    .chat-input-row button {
+      flex-shrink: 0;
+    }
+    .kb-stat {
+      display: inline-block;
+      padding: 0.375rem 0.75rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.8125rem;
+      margin-right: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .kb-stat strong {
+      color: var(--cloud);
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
@@ -401,6 +464,7 @@
       <div class="nav-item" data-panel="ground-truth">Ground Truth</div>
       <div class="nav-item" data-panel="evaluate">Evaluate</div>
       <div class="nav-item" data-panel="database">Database</div>
+      <div class="nav-item" data-panel="knowledge-base">Knowledge Base</div>
       <div class="nav-item" data-panel="schemas">Schemas</div>
     </div>
 
@@ -517,6 +581,48 @@
           <input type="checkbox" id="db-include-ddl">
           Include CREATE TABLE statement
         </label>
+      </div>
+    </div>
+
+    <!-- KNOWLEDGE BASE -->
+    <div id="knowledge-base" class="panel">
+      <div class="section">
+        <div class="section-title">Customer Knowledge Base</div>
+        <p class="section-desc">
+          Extracted data is stored per customer. Ask questions in natural language — the system
+          generates SQL, queries the data, and explains the results.
+        </p>
+        <div class="row">
+          <div>
+            <label>Customer ID</label>
+            <input type="text" id="kb-customer-id" placeholder="e.g. acme-corp">
+          </div>
+          <div>
+            <label>Status</label>
+            <div id="kb-stats" style="padding-top:0.375rem;">
+              <span class="kb-stat" style="color:var(--mid);">Enter a customer ID</span>
+            </div>
+          </div>
+        </div>
+        <button class="btn-ghost" id="kb-refresh-btn">Refresh Stats</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section">
+        <div class="section-title">Ask a Question</div>
+        <div class="chat-log" id="kb-chat-log"></div>
+        <div class="chat-input-row">
+          <input type="text" id="kb-question" placeholder="e.g. What's the total of all invoices from last month?">
+          <button id="kb-ask-btn">Ask</button>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section">
+        <div class="section-title">All Customers</div>
+        <div id="kb-customer-list" style="color:var(--mid);font-size:0.8125rem;">Loading...</div>
       </div>
     </div>
 
@@ -670,6 +776,7 @@
             <div class="actions">
               <button class="save-gt-btn">Save as Ground Truth</button>
               <button class="gen-sql-btn btn-ghost">Convert to SQL</button>
+              <button class="index-kb-btn btn-ghost">Index to KB</button>
               <span class="gt-msg msg"></span>
             </div>
             <div class="sql-section" style="display:none;">
@@ -761,6 +868,25 @@
               sqlMsg.textContent = `${sd.succeeded}/${sd.total} statements succeeded`;
               sqlMsg.style.color = sd.succeeded === sd.total ? 'var(--sage)' : 'var(--amber)';
             } catch (e) { sqlMsg.textContent = e.message; sqlMsg.style.color = 'var(--rose)'; }
+          });
+
+          // Index to Knowledge Base
+          card.querySelector('.index-kb-btn').addEventListener('click', async () => {
+            const customerId = document.getElementById('kb-customer-id')?.value.trim();
+            if (!customerId) { msg.textContent = 'Set Customer ID in Knowledge Base tab'; msg.style.color = 'var(--amber)'; return; }
+            const jsonStr = card.querySelector('.json-edit').value.trim();
+            const sfd = new FormData();
+            sfd.append('customer_id', customerId);
+            sfd.append('doc_type', data.doc_type);
+            sfd.append('extracted_json', jsonStr);
+            sfd.append('source_file', data.source_file);
+            try {
+              const sr = await fetch('/api/rag/index', { method: 'POST', body: sfd });
+              const sd = await sr.json();
+              if (!sr.ok) throw new Error(sd.detail);
+              msg.textContent = `Indexed to ${customerId} (${sd.table})`;
+              msg.style.color = 'var(--sage)';
+            } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--rose)'; }
           });
         } catch (e) {
           card.querySelector('h3').innerHTML = `${file.name} <span class="badge" style="background:var(--rose-bg);color:var(--rose);">error</span>`;
@@ -915,6 +1041,100 @@
     });
 
     // --- Generate schema from description ---
+    // =====================================================================
+    // KNOWLEDGE BASE
+    // =====================================================================
+    async function loadKbCustomers() {
+      try {
+        const res = await fetch('/api/rag/customers');
+        const customers = await res.json();
+        const el = document.getElementById('kb-customer-list');
+        if (!customers.length) {
+          el.textContent = 'No knowledge bases yet. Extract documents and click "Index to KB".';
+          return;
+        }
+        el.innerHTML = customers.map(c =>
+          `<div class="schema-row">
+            <span>${c.customer_id}</span>
+            <span><span class="badge">${c.total_rows} rows</span> <span class="badge">${c.tables.length} tables</span></span>
+          </div>`
+        ).join('');
+      } catch {}
+    }
+    loadKbCustomers();
+
+    document.getElementById('kb-refresh-btn').addEventListener('click', async () => {
+      const customerId = document.getElementById('kb-customer-id').value.trim();
+      if (!customerId) return;
+      try {
+        const res = await fetch(`/api/rag/status/${customerId}`);
+        const stats = await res.json();
+        const el = document.getElementById('kb-stats');
+        if (!stats.exists) {
+          el.innerHTML = '<span class="kb-stat" style="color:var(--mid);">No data yet</span>';
+        } else {
+          el.innerHTML = stats.tables.map(t =>
+            `<span class="kb-stat"><strong>${t.name}</strong> ${t.rows} rows</span>`
+          ).join('');
+        }
+      } catch {}
+      loadKbCustomers();
+    });
+
+    document.getElementById('kb-ask-btn').addEventListener('click', askKbQuestion);
+    document.getElementById('kb-question').addEventListener('keydown', e => {
+      if (e.key === 'Enter') askKbQuestion();
+    });
+
+    async function askKbQuestion() {
+      const customerId = document.getElementById('kb-customer-id').value.trim();
+      const question = document.getElementById('kb-question').value.trim();
+      if (!customerId || !question) return;
+
+      const chatLog = document.getElementById('kb-chat-log');
+      const btn = document.getElementById('kb-ask-btn');
+
+      // Show user message
+      chatLog.innerHTML += `<div class="chat-msg user">${escHtml(question)}</div>`;
+      document.getElementById('kb-question').value = '';
+      btn.disabled = true;
+
+      // Show thinking indicator
+      const thinkingEl = document.createElement('div');
+      thinkingEl.className = 'chat-msg assistant';
+      thinkingEl.style.color = 'var(--mid)';
+      thinkingEl.textContent = 'Thinking...';
+      chatLog.appendChild(thinkingEl);
+      chatLog.scrollTop = chatLog.scrollHeight;
+
+      const fd = new FormData();
+      fd.append('customer_id', customerId);
+      fd.append('question', question);
+
+      try {
+        const res = await fetch('/api/rag/query', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Query failed');
+
+        thinkingEl.style.color = '';
+        thinkingEl.innerHTML = `${escHtml(data.answer)}
+          <div class="sql-preview">${escHtml(data.sql)}</div>`;
+      } catch (e) {
+        thinkingEl.style.color = 'var(--rose)';
+        thinkingEl.textContent = e.message;
+      }
+
+      chatLog.scrollTop = chatLog.scrollHeight;
+      btn.disabled = false;
+    }
+
+    function escHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // =====================================================================
+    // SCHEMA GENERATION
+    // =====================================================================
     document.getElementById('gen-schema-btn').addEventListener('click', async () => {
       const key = document.getElementById('gen-schema-key').value.trim();
       const desc = document.getElementById('gen-schema-desc').value.trim();
