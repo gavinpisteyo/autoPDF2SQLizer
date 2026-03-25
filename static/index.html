@@ -127,7 +127,18 @@
       </div>
       <button id="ext-btn" disabled>Extract Data</button>
       <div id="ext-status"></div>
-      <div id="ext-result" class="result-box" style="display:none;"></div>
+    </div>
+    <div class="card" id="ext-review-card" style="display:none;">
+      <h2>Review & Correct</h2>
+      <p style="color:var(--muted);font-size:0.8125rem;margin-bottom:1rem;">
+        Edit any incorrect fields below, then save as ground truth to build your labeled dataset.
+      </p>
+      <textarea id="ext-result-edit" style="min-height:300px;"></textarea>
+      <div style="display:flex;gap:0.5rem;align-items:center;">
+        <button id="ext-save-gt-btn">Save as Ground Truth</button>
+        <span style="color:var(--muted);font-size:0.8125rem;">Corrected data becomes the source of truth for the Wiggum loop</span>
+      </div>
+      <div id="ext-gt-status"></div>
     </div>
   </div>
 
@@ -187,11 +198,28 @@
   <!-- SCHEMAS -->
   <div id="schemas" class="panel">
     <div class="card">
+      <h2>Describe What You Want</h2>
+      <p style="color:var(--muted);font-size:0.8125rem;margin-bottom:1rem;">
+        Describe the fields you want to extract in plain English. We'll generate the schema for you.
+      </p>
+      <label>Document Type Key</label>
+      <input type="text" id="gen-schema-key" placeholder="e.g. purchase_order">
+      <label>Describe the fields</label>
+      <textarea id="gen-schema-desc" style="min-height:80px;" placeholder="e.g. I need the invoice number, vendor name, invoice date, each line item with description and amount, the subtotal, tax, and total."></textarea>
+      <button id="gen-schema-btn">Generate Schema</button>
+      <div id="gen-schema-status"></div>
+      <div id="gen-schema-result" style="display:none;">
+        <label style="margin-top:1rem;">Generated Schema (edit if needed)</label>
+        <textarea id="gen-schema-output" style="min-height:200px;"></textarea>
+        <button id="gen-schema-save-btn" class="btn-secondary">Save Schema</button>
+      </div>
+    </div>
+    <div class="card">
       <h2>Available Schemas</h2>
       <div id="schema-list"></div>
     </div>
     <div class="card">
-      <h2>Add Custom Schema</h2>
+      <h2>Add Custom Schema (JSON)</h2>
       <label>Document Type Key</label>
       <input type="text" id="schema-key" placeholder="e.g. purchase_order">
       <label>JSON Schema</label>
@@ -253,6 +281,8 @@
 
     // --- Extract panel ---
     let extFile = null;
+    let lastExtraction = null; // store last extraction metadata for save-as-ground-truth
+
     setupDrop('ext-drop', 'ext-file', (f, zone) => {
       extFile = f;
       zone.querySelector('p').innerHTML = `<span class="filename">${f.name}</span>`;
@@ -264,7 +294,7 @@
       const btn = document.getElementById('ext-btn');
       btn.disabled = true;
       setStatus('ext-status', 'Extracting... (this may take a minute)', 'loading');
-      document.getElementById('ext-result').style.display = 'none';
+      document.getElementById('ext-review-card').style.display = 'none';
 
       const fd = new FormData();
       fd.append('file', extFile);
@@ -276,14 +306,43 @@
         const res = await fetch('/api/extract', { method: 'POST', body: fd });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Extraction failed');
-        setStatus('ext-status', 'Extraction complete', 'success');
-        const box = document.getElementById('ext-result');
-        box.style.display = 'block';
-        box.textContent = JSON.stringify(data.extracted, null, 2);
+        setStatus('ext-status', 'Extraction complete — review and correct below', 'success');
+
+        // Show editable results
+        lastExtraction = { source_file: data.source_file, doc_type: data.doc_type };
+        document.getElementById('ext-result-edit').value = JSON.stringify(data.extracted, null, 2);
+        document.getElementById('ext-review-card').style.display = 'block';
       } catch (e) {
         setStatus('ext-status', e.message, 'error');
       }
       btn.disabled = false;
+    });
+
+    // Save corrected extraction as ground truth
+    document.getElementById('ext-save-gt-btn').addEventListener('click', async () => {
+      if (!lastExtraction) return;
+      const corrected = document.getElementById('ext-result-edit').value.trim();
+      try {
+        JSON.parse(corrected); // validate
+      } catch {
+        setStatus('ext-gt-status', 'Invalid JSON — fix the syntax and try again', 'error');
+        return;
+      }
+
+      const fd = new FormData();
+      fd.append('source_file', lastExtraction.source_file);
+      fd.append('doc_type', lastExtraction.doc_type);
+      fd.append('corrected_json', corrected);
+
+      try {
+        const res = await fetch('/api/save-as-ground-truth', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Save failed');
+        setStatus('ext-gt-status', `Saved as ground truth: ${data.doc_type}/${data.name}`, 'success');
+        loadGroundTruth();
+      } catch (e) {
+        setStatus('ext-gt-status', e.message, 'error');
+      }
     });
 
     // --- Ground truth panel ---
@@ -368,7 +427,54 @@
       btn.disabled = false;
     });
 
-    // --- Schema save ---
+    // --- Generate schema from description ---
+    document.getElementById('gen-schema-btn').addEventListener('click', async () => {
+      const key = document.getElementById('gen-schema-key').value.trim();
+      const desc = document.getElementById('gen-schema-desc').value.trim();
+      if (!key || !desc) return setStatus('gen-schema-status', 'Fill in both fields', 'error');
+
+      const btn = document.getElementById('gen-schema-btn');
+      btn.disabled = true;
+      setStatus('gen-schema-status', 'Generating schema...', 'loading');
+      document.getElementById('gen-schema-result').style.display = 'none';
+
+      const fd = new FormData();
+      fd.append('description', desc);
+      fd.append('doc_type_key', key);
+
+      try {
+        const res = await fetch('/api/generate-schema', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Generation failed');
+        setStatus('gen-schema-status', `Schema generated and saved as "${data.doc_type}"`, 'success');
+        document.getElementById('gen-schema-output').value = JSON.stringify(data.schema, null, 2);
+        document.getElementById('gen-schema-result').style.display = 'block';
+        loadSchemas();
+      } catch (e) {
+        setStatus('gen-schema-status', e.message, 'error');
+      }
+      btn.disabled = false;
+    });
+
+    // Re-save edited generated schema
+    document.getElementById('gen-schema-save-btn').addEventListener('click', async () => {
+      const key = document.getElementById('gen-schema-key').value.trim();
+      const body = document.getElementById('gen-schema-output').value.trim();
+      if (!key || !body) return;
+      try {
+        const schema = JSON.parse(body);
+        const res = await fetch(`/api/schemas/${key}`, {
+          method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(schema)
+        });
+        if (!res.ok) throw new Error('Save failed');
+        setStatus('gen-schema-status', `Schema "${key}" updated`, 'success');
+        loadSchemas();
+      } catch (e) {
+        setStatus('gen-schema-status', e.message, 'error');
+      }
+    });
+
+    // --- Schema save (manual JSON) ---
     document.getElementById('schema-save-btn').addEventListener('click', async () => {
       const key = document.getElementById('schema-key').value.trim();
       const body = document.getElementById('schema-body').value.trim();

@@ -12,6 +12,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from anthropic import Anthropic
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,6 +23,8 @@ from fastapi.staticfiles import StaticFiles
 
 from doc_intel import analyze_document, cache_result, get_cached_result
 from process import extract
+
+llm = Anthropic()
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -123,6 +126,9 @@ async def extract_pdf(
     except Exception as e:
         raise HTTPException(500, f"Document Intelligence error: {e}")
 
+    # Cache the raw result so it's available for the Wiggum loop later
+    cache_result(doc_type, upload_path.stem, raw)
+
     # Run extraction
     try:
         result = extract(raw, doc_type, schema)
@@ -138,6 +144,7 @@ async def extract_pdf(
         "extracted": result,
         "schema": schema,
         "source_file": file.filename,
+        "doc_type": doc_type,
     }
 
 
@@ -221,6 +228,104 @@ async def cache_ground_truth():
             except Exception as e:
                 results.append({"name": name, "doc_type": doc_type, "status": f"error: {e}"})
     return results
+
+
+# ---------------------------------------------------------------------------
+# Generate schema from natural language description
+# ---------------------------------------------------------------------------
+
+@app.post("/api/generate-schema")
+async def generate_schema(description: str = Form(...), doc_type_key: str = Form(...)):
+    """Generate a JSON Schema from a plain-English description of desired fields."""
+
+    system = """You are a JSON Schema generator. The user will describe what fields
+they want to extract from a document. Generate a valid JSON Schema with:
+- "type": "object"
+- "properties": { ... } with each field having "type" and "description"
+- Supported types: string, number, array, object
+
+Use snake_case for field names. For dates, use type "string" with a
+description noting YYYY-MM-DD format. For arrays of objects, nest
+the item schema properly.
+
+Return ONLY the JSON Schema — no markdown fences, no explanation."""
+
+    try:
+        response = llm.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2048,
+            temperature=0.0,
+            system=system,
+            messages=[{"role": "user", "content": description}],
+        )
+        text = response.content[0].text
+        schema = json.loads(text)
+    except json.JSONDecodeError:
+        import re
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            schema = json.loads(match.group())
+        else:
+            raise HTTPException(500, "Failed to parse generated schema")
+    except Exception as e:
+        raise HTTPException(500, f"Schema generation error: {e}")
+
+    # Auto-save as custom schema
+    CUSTOM_SCHEMAS_DIR.mkdir(parents=True, exist_ok=True)
+    path = CUSTOM_SCHEMAS_DIR / f"{doc_type_key}.json"
+    with open(path, "w") as f:
+        json.dump(schema, f, indent=2)
+
+    return {"schema": schema, "doc_type": doc_type_key, "saved_to": str(path)}
+
+
+# ---------------------------------------------------------------------------
+# Save corrected extraction as ground truth
+# ---------------------------------------------------------------------------
+
+@app.post("/api/save-as-ground-truth")
+async def save_as_ground_truth(
+    source_file: str = Form(...),
+    doc_type: str = Form(...),
+    corrected_json: str = Form(...),
+):
+    """
+    Save a corrected extraction result as ground truth.
+    Copies the PDF from uploads/ to ground_truth/<doc_type>/ and
+    saves the corrected JSON alongside it.
+    """
+    # Validate the corrected JSON
+    try:
+        truth_data = json.loads(corrected_json)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "corrected_json must be valid JSON")
+
+    # Find the source PDF in uploads/
+    source_path = UPLOADS_DIR / source_file
+    if not source_path.exists():
+        raise HTTPException(404, f"Source PDF not found in uploads: {source_file}")
+
+    stem = source_path.stem
+
+    # Copy PDF to ground truth
+    type_dir = GROUND_TRUTH_DIR / doc_type
+    type_dir.mkdir(parents=True, exist_ok=True)
+
+    gt_pdf_path = type_dir / f"{stem}.pdf"
+    shutil.copy2(source_path, gt_pdf_path)
+
+    # Save corrected JSON
+    gt_json_path = type_dir / f"{stem}.json"
+    with open(gt_json_path, "w") as f:
+        json.dump(truth_data, f, indent=2)
+
+    return {
+        "status": "saved",
+        "doc_type": doc_type,
+        "name": stem,
+        "pdf_path": str(gt_pdf_path),
+        "truth_path": str(gt_json_path),
+    }
 
 
 # ---------------------------------------------------------------------------
