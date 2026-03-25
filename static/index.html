@@ -3,272 +3,570 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>autoPDF2SQLizer</title>
+  <title>autoPDF2SQLizer | Pisteyo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #0f1117;
-      --surface: #1a1d27;
-      --border: #2a2d3a;
-      --text: #e4e4e7;
-      --muted: #71717a;
-      --accent: #6366f1;
-      --accent-hover: #818cf8;
-      --success: #22c55e;
-      --error: #ef4444;
-      --warning: #f59e0b;
+      --black: #161616;
+      --charcoal: #323232;
+      --mid: #525252;
+      --silver: #d7d7d7;
+      --cloud: #f7f7f7;
+      --white: #ffffff;
+      --surface: #1e1e1e;
+      --border: rgba(255,255,255,0.06);
+      --border-strong: rgba(255,255,255,0.1);
+      --coral: #FF4F5E;
+      --coral-muted: #cc4450;
+      --coral-bg: rgba(255,79,94,0.08);
+      --sage: #5a8a7a;
+      --sage-bg: rgba(90,138,122,0.1);
+      --rose: #9c6464;
+      --rose-bg: rgba(156,100,100,0.1);
+      --amber: #9c8a5a;
+      --amber-bg: rgba(156,138,90,0.1);
     }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-      background: var(--bg); color: var(--text);
-      line-height: 1.6; padding: 2rem; max-width: 960px; margin: 0 auto;
+      font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+      background: var(--black);
+      color: var(--silver);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
     }
-    h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.25rem; }
-    h1 span { color: var(--accent); }
-    .subtitle { color: var(--muted); font-size: 0.875rem; margin-bottom: 2rem; }
-    .tabs {
-      display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem;
+
+    /* ---- Layout Shell ---- */
+    .shell {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 3rem 2rem 4rem;
     }
-    .tab {
-      padding: 0.625rem 1.25rem; cursor: pointer; font-size: 0.875rem;
-      color: var(--muted); border-bottom: 2px solid transparent;
-      transition: all 0.15s;
+
+    /* ---- Header ---- */
+    .header {
+      margin-bottom: 3rem;
     }
-    .tab:hover { color: var(--text); }
-    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .header h1 {
+      font-family: 'Montserrat', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--cloud);
+    }
+    .header h1 span {
+      font-weight: 400;
+      color: var(--coral);
+    }
+    .header p {
+      font-size: 0.8125rem;
+      color: var(--mid);
+      margin-top: 0.25rem;
+      font-weight: 300;
+      letter-spacing: 0.01em;
+    }
+
+    /* ---- Navigation ---- */
+    .nav {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 2.5rem;
+    }
+    .nav-item {
+      padding: 0.75rem 1.5rem 0.75rem 0;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--mid);
+      cursor: pointer;
+      border-bottom: 1.5px solid transparent;
+      margin-bottom: -1px;
+      transition: color 0.2s ease, border-color 0.2s ease;
+      letter-spacing: 0.01em;
+    }
+    .nav-item:hover { color: var(--silver); }
+    .nav-item.active {
+      color: var(--cloud);
+      border-bottom-color: var(--coral);
+    }
+
+    /* ---- Panels ---- */
     .panel { display: none; }
     .panel.active { display: block; }
-    .card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem;
+
+    /* ---- Sections ---- */
+    .section {
+      margin-bottom: 2.5rem;
     }
-    .card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; }
-    label { display: block; font-size: 0.8125rem; color: var(--muted); margin-bottom: 0.375rem; }
+    .section-title {
+      font-family: 'Montserrat', sans-serif;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--cloud);
+      letter-spacing: -0.01em;
+      margin-bottom: 0.375rem;
+    }
+    .section-desc {
+      font-size: 0.8125rem;
+      color: var(--mid);
+      margin-bottom: 1.25rem;
+      font-weight: 300;
+    }
+    .section-desc code {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.75rem;
+      color: var(--silver);
+      background: rgba(255,255,255,0.04);
+      padding: 0.125rem 0.375rem;
+      border-radius: 3px;
+    }
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 2.5rem 0;
+    }
+
+    /* ---- Form Elements ---- */
+    label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--mid);
+      margin-bottom: 0.375rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
     select, input[type="text"], textarea {
-      width: 100%; padding: 0.5rem 0.75rem; font-size: 0.875rem;
-      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-      color: var(--text); margin-bottom: 1rem; font-family: inherit;
+      width: 100%;
+      padding: 0.625rem 0.75rem;
+      font-size: 0.875rem;
+      font-family: 'IBM Plex Sans', sans-serif;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      color: var(--silver);
+      margin-bottom: 1.25rem;
+      transition: border-color 0.2s ease;
+      outline: none;
     }
-    textarea { min-height: 120px; font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 0.8125rem; }
-    select:focus, input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+    select:focus, input:focus, textarea:focus {
+      border-color: var(--coral);
+    }
+    textarea {
+      min-height: 120px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.8125rem;
+      line-height: 1.5;
+      resize: vertical;
+    }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
+
+    /* ---- Drop Zone ---- */
     .drop-zone {
-      border: 2px dashed var(--border); border-radius: 8px; padding: 2rem;
-      text-align: center; color: var(--muted); cursor: pointer; transition: all 0.15s;
-      margin-bottom: 1rem;
+      border: 1.5px dashed var(--charcoal);
+      border-radius: 8px;
+      padding: 2rem;
+      text-align: center;
+      color: var(--mid);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      margin-bottom: 1.25rem;
+      background: transparent;
     }
-    .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); color: var(--text); }
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--coral);
+      color: var(--silver);
+      background: var(--coral-bg);
+    }
     .drop-zone input { display: none; }
-    .drop-zone .filename { color: var(--accent); font-weight: 500; }
+    .drop-zone p { font-size: 0.8125rem; font-weight: 300; }
+    .drop-zone strong { font-weight: 500; color: var(--silver); }
+    .drop-zone .filename { color: var(--coral); font-weight: 500; }
+
+    /* ---- Buttons ---- */
     button {
-      padding: 0.5rem 1.25rem; font-size: 0.875rem; font-weight: 500;
-      background: var(--accent); color: white; border: none; border-radius: 6px;
-      cursor: pointer; transition: background 0.15s;
+      font-family: 'IBM Plex Sans', sans-serif;
+      padding: 0.5rem 1.25rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      background: var(--coral);
+      color: var(--white);
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      letter-spacing: 0.01em;
     }
-    button:hover { background: var(--accent-hover); }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-secondary { background: var(--surface); border: 1px solid var(--border); color: var(--text); }
-    .btn-secondary:hover { background: var(--border); }
-    .result-box {
-      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-      padding: 1rem; font-family: 'SF Mono', Monaco, Consolas, monospace;
-      font-size: 0.8125rem; white-space: pre-wrap; overflow-x: auto;
-      max-height: 500px; overflow-y: auto; margin-top: 1rem;
+    button:hover {
+      background: var(--coral-muted);
     }
-    .status { padding: 0.375rem 0.75rem; border-radius: 4px; font-size: 0.8125rem; margin-top: 1rem; }
-    .status.success { background: rgba(34,197,94,0.1); color: var(--success); }
-    .status.error { background: rgba(239,68,68,0.1); color: var(--error); }
-    .status.loading { background: rgba(99,102,241,0.1); color: var(--accent); }
-    .ground-truth-list { list-style: none; }
-    .ground-truth-list li {
-      padding: 0.5rem 0; border-bottom: 1px solid var(--border);
-      font-size: 0.875rem; display: flex; justify-content: space-between;
+    button:active {
+      transform: translateY(1px);
     }
-    .badge {
-      font-size: 0.75rem; padding: 0.125rem 0.5rem; border-radius: 4px;
-      background: var(--border); color: var(--muted);
+    button:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+      transform: none;
     }
-    .badge.cached { background: rgba(34,197,94,0.15); color: var(--success); }
-    .row { display: flex; gap: 1rem; }
-    .row > * { flex: 1; }
-    .accuracy-bar {
-      height: 8px; background: var(--border); border-radius: 4px; margin-top: 0.5rem; overflow: hidden;
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border-strong);
+      color: var(--silver);
     }
-    .accuracy-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.3s; }
-    .doc-result { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; margin-bottom: 0.75rem; }
-    .doc-result-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
-    .doc-result-header h3 { font-size: 0.875rem; font-weight: 600; }
-    .doc-result-body { display: none; margin-top: 1rem; }
+    .btn-ghost:hover {
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.15);
+    }
+
+    /* ---- Status Messages ---- */
+    .status {
+      padding: 0.5rem 0.75rem;
+      border-radius: 5px;
+      font-size: 0.8125rem;
+      margin-top: 1rem;
+      font-weight: 400;
+    }
+    .status.success { background: var(--sage-bg); color: var(--sage); }
+    .status.error { background: var(--rose-bg); color: var(--rose); }
+    .status.loading { background: rgba(255,255,255,0.04); color: var(--silver); }
+
+    /* ---- File Chips ---- */
+    .file-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+      padding: 0.25rem 0.625rem;
+      font-size: 0.75rem;
+      margin: 0.125rem;
+      color: var(--silver);
+    }
+    .file-chip .remove {
+      cursor: pointer;
+      color: var(--mid);
+      font-weight: 600;
+      transition: color 0.15s;
+    }
+    .file-chip .remove:hover { color: var(--rose); }
+
+    /* ---- Document Result Cards ---- */
+    .doc-result {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 0.75rem;
+      overflow: hidden;
+      transition: border-color 0.2s ease;
+    }
+    .doc-result:hover { border-color: var(--border-strong); }
+    .doc-result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 1.25rem;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .doc-result-header:hover { background: rgba(255,255,255,0.015); }
+    .doc-result-header h3 {
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--silver);
+    }
+    .doc-result-body {
+      display: none;
+      padding: 0 1.25rem 1.25rem;
+    }
     .doc-result.open .doc-result-body { display: block; }
-    .doc-result .chevron { transition: transform 0.15s; color: var(--muted); }
+    .chevron {
+      color: var(--mid);
+      font-size: 0.75rem;
+      transition: transform 0.2s ease;
+    }
     .doc-result.open .chevron { transform: rotate(90deg); }
-    .file-chip { display: inline-flex; align-items: center; gap: 0.375rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.25rem 0.625rem; font-size: 0.8125rem; margin: 0.125rem; }
-    .file-chip .remove { cursor: pointer; color: var(--muted); font-weight: bold; }
-    .file-chip .remove:hover { color: var(--error); }
-    .pair-row { display: flex; justify-content: space-between; align-items: center; padding: 0.375rem 0; border-bottom: 1px solid var(--border); font-size: 0.8125rem; }
-    .pair-row .pair-status { font-size: 0.75rem; }
+
+    /* ---- Badges ---- */
+    .badge {
+      font-size: 0.6875rem;
+      font-weight: 500;
+      padding: 0.125rem 0.5rem;
+      border-radius: 3px;
+      background: rgba(255,255,255,0.04);
+      color: var(--mid);
+      letter-spacing: 0.02em;
+    }
+    .badge.ok { background: var(--sage-bg); color: var(--sage); }
+
+    /* ---- Ground Truth List ---- */
+    .gt-list { list-style: none; }
+    .gt-list li {
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8125rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .gt-list li:last-child { border-bottom: none; }
+
+    /* ---- Pair Rows ---- */
+    .pair-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.375rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8125rem;
+    }
+
+    /* ---- Schema List ---- */
+    .schema-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8125rem;
+    }
+    .schema-row:last-child { border-bottom: none; }
+
+    /* ---- Result Box ---- */
+    .result-box {
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      padding: 1rem;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.8125rem;
+      white-space: pre-wrap;
+      overflow-x: auto;
+      max-height: 500px;
+      overflow-y: auto;
+      margin-top: 1rem;
+      color: var(--silver);
+      line-height: 1.5;
+    }
+
+    /* ---- Inline Actions ---- */
+    .actions {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 0.75rem;
+    }
+    .actions .msg {
+      font-size: 0.8125rem;
+      color: var(--mid);
+    }
+
+    /* ---- SQL Section ---- */
+    .sql-section { margin-top: 1rem; }
+
+    /* ---- Checkbox ---- */
+    .check-label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      margin-bottom: 1.25rem;
+      font-size: 0.8125rem;
+      color: var(--silver);
+    }
+    .check-label input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+      accent-color: var(--silver);
+    }
   </style>
 </head>
 <body>
-  <h1>auto<span>PDF2SQL</span>izer</h1>
-  <p class="subtitle">Upload PDFs. Extract structured data. Iterate to 100% accuracy.</p>
+  <div class="shell">
 
-  <div class="tabs">
-    <div class="tab active" data-panel="extract">Extract</div>
-    <div class="tab" data-panel="ground-truth">Ground Truth</div>
-    <div class="tab" data-panel="evaluate">Evaluate</div>
-    <div class="tab" data-panel="database">Database</div>
-    <div class="tab" data-panel="schemas">Schemas</div>
-  </div>
+    <!-- Header -->
+    <div class="header">
+      <h1>autoPDF2SQLizer <span>by Pisteyo</span></h1>
+      <p>Extract structured data from documents. Build accuracy. Push to your database.</p>
+    </div>
 
-  <!-- EXTRACT -->
-  <div id="extract" class="panel active">
-    <div class="card">
-      <h2>Upload & Extract</h2>
-      <div class="row">
-        <div>
-          <label>Document Type</label>
-          <select id="ext-doc-type"></select>
+    <!-- Navigation -->
+    <div class="nav">
+      <div class="nav-item active" data-panel="extract">Extract</div>
+      <div class="nav-item" data-panel="ground-truth">Ground Truth</div>
+      <div class="nav-item" data-panel="evaluate">Evaluate</div>
+      <div class="nav-item" data-panel="database">Database</div>
+      <div class="nav-item" data-panel="schemas">Schemas</div>
+    </div>
+
+    <!-- EXTRACT -->
+    <div id="extract" class="panel active">
+      <div class="section">
+        <div class="section-title">Upload & Extract</div>
+        <div class="row">
+          <div>
+            <label>Document Type</label>
+            <select id="ext-doc-type"></select>
+          </div>
+          <div>
+            <label>Custom Schema (optional)</label>
+            <input type="text" id="ext-custom-schema" placeholder='{"properties":{...}}'>
+          </div>
         </div>
-        <div>
-          <label>Custom Schema (optional JSON)</label>
-          <input type="text" id="ext-custom-schema" placeholder='{"properties":{...}}'>
+        <div class="drop-zone" id="ext-drop">
+          <input type="file" accept=".pdf" id="ext-file" multiple>
+          <p>Drop PDFs here or <strong>click to browse</strong></p>
         </div>
+        <div id="ext-file-list" style="margin-bottom:1rem;"></div>
+        <button id="ext-btn" disabled>Extract All</button>
+        <div id="ext-status"></div>
       </div>
-      <div class="drop-zone" id="ext-drop">
-        <input type="file" accept=".pdf" id="ext-file" multiple>
-        <p>Drop PDFs here or <strong>click to browse</strong> (multiple allowed)</p>
-      </div>
-      <div id="ext-file-list" style="margin-bottom:1rem;"></div>
-      <button id="ext-btn" disabled>Extract All</button>
-      <div id="ext-status"></div>
+      <div id="ext-results-list"></div>
     </div>
-    <div id="ext-results-list"></div>
-  </div>
 
-  <!-- GROUND TRUTH -->
-  <div id="ground-truth" class="panel">
-    <div class="card">
-      <h2>Upload Ground Truth</h2>
-      <p style="color:var(--muted);font-size:0.8125rem;margin-bottom:1rem;">
-        Drop PDFs and their matching JSON files. They're auto-paired by filename:<br>
-        <code style="color:var(--accent);">invoice_001.pdf</code> pairs with <code style="color:var(--accent);">invoice_001.json</code>
-      </p>
-      <label>Document Type</label>
-      <select id="gt-doc-type"></select>
-      <div class="drop-zone" id="gt-batch-drop">
-        <input type="file" accept=".pdf,.json" id="gt-batch-file" multiple>
-        <p>Drop PDFs + JSON files here (multiple allowed)</p>
-      </div>
-      <div id="gt-pair-list" style="margin-bottom:1rem;"></div>
-      <button id="gt-upload-btn" disabled>Upload All Pairs</button>
-      <div id="gt-status"></div>
-    </div>
-    <div class="card">
-      <h2>Ground Truth Documents</h2>
-      <ul class="ground-truth-list" id="gt-list">
-        <li style="color:var(--muted);">Loading...</li>
-      </ul>
-      <div style="margin-top:1rem;">
-        <button class="btn-secondary" id="gt-cache-btn">Cache All (Run Doc Intel)</button>
-        <span id="gt-cache-status" style="margin-left:0.5rem;font-size:0.8125rem;color:var(--muted);"></span>
-      </div>
-    </div>
-  </div>
-
-  <!-- EVALUATE -->
-  <div id="evaluate" class="panel">
-    <div class="card">
-      <h2>Run Evaluation</h2>
-      <p style="color:var(--muted);font-size:0.8125rem;margin-bottom:1rem;">
-        Run extraction on all cached ground truth documents and score accuracy.
-      </p>
-      <button id="eval-btn">Run Evaluation</button>
-      <div id="eval-status"></div>
-      <div id="eval-result" class="result-box" style="display:none;"></div>
-    </div>
-  </div>
-
-  <!-- DATABASE -->
-  <div id="database" class="panel">
-    <div class="card">
-      <h2>Connection</h2>
-      <p style="color:var(--muted);font-size:0.8125rem;margin-bottom:1rem;">
-        Configure your database connection. This is used when uploading extracted data.
-      </p>
-      <label>Dialect</label>
-      <select id="db-dialect">
-        <option value="mssql" selected>SQL Server</option>
-        <option value="postgres">PostgreSQL</option>
-        <option value="mysql">MySQL</option>
-      </select>
-      <label>Connection String</label>
-      <input type="text" id="db-conn-str" placeholder="mssql+pymssql://user:pass@server/database">
-      <p style="color:var(--muted);font-size:0.75rem;margin-top:-0.75rem;margin-bottom:1rem;">
-        SQL Server: <code>mssql+pymssql://user:pass@server/database</code><br>
-        PostgreSQL: <code>postgresql://user:pass@host:5432/database</code><br>
-        MySQL: <code>mysql://user:pass@host:3306/database</code>
-      </p>
-      <button id="db-test-btn">Test Connection</button>
-      <div id="db-test-status"></div>
-    </div>
-    <div class="card">
-      <h2>SQL Settings</h2>
-      <div class="row">
-        <div>
-          <label>Target Table Name</label>
-          <input type="text" id="db-table-name" placeholder="e.g. Invoices">
+    <!-- GROUND TRUTH -->
+    <div id="ground-truth" class="panel">
+      <div class="section">
+        <div class="section-title">Upload Ground Truth</div>
+        <p class="section-desc">
+          Drop PDFs and their matching JSON files. Auto-paired by filename:<br>
+          <code>invoice_001.pdf</code> pairs with <code>invoice_001.json</code>
+        </p>
+        <label>Document Type</label>
+        <select id="gt-doc-type"></select>
+        <div class="drop-zone" id="gt-batch-drop">
+          <input type="file" accept=".pdf,.json" id="gt-batch-file" multiple>
+          <p>Drop PDFs + JSON files here</p>
         </div>
-        <div>
-          <label>Schema / Owner</label>
-          <input type="text" id="db-schema-name" value="dbo">
+        <div id="gt-pair-list" style="margin-bottom:1rem;"></div>
+        <button id="gt-upload-btn" disabled>Upload All Pairs</button>
+        <div id="gt-status"></div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section">
+        <div class="section-title">Ground Truth Documents</div>
+        <ul class="gt-list" id="gt-list">
+          <li style="color:var(--mid);">Loading...</li>
+        </ul>
+        <div style="margin-top:1.25rem;">
+          <button class="btn-ghost" id="gt-cache-btn">Cache All via Doc Intel</button>
+          <span id="gt-cache-status" style="margin-left:0.5rem;font-size:0.8125rem;color:var(--mid);"></span>
         </div>
       </div>
-      <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin-bottom:1rem;">
-        <input type="checkbox" id="db-include-ddl" style="width:auto;margin:0;">
-        <span>Include CREATE TABLE statement</span>
-      </label>
     </div>
-  </div>
 
-  <!-- SCHEMAS -->
-  <div id="schemas" class="panel">
-    <div class="card">
-      <h2>Describe What You Want</h2>
-      <p style="color:var(--muted);font-size:0.8125rem;margin-bottom:1rem;">
-        Describe the fields you want to extract in plain English. We'll generate the schema for you.
-      </p>
-      <label>Document Type Key</label>
-      <input type="text" id="gen-schema-key" placeholder="e.g. purchase_order">
-      <label>Describe the fields</label>
-      <textarea id="gen-schema-desc" style="min-height:80px;" placeholder="e.g. I need the invoice number, vendor name, invoice date, each line item with description and amount, the subtotal, tax, and total."></textarea>
-      <button id="gen-schema-btn">Generate Schema</button>
-      <div id="gen-schema-status"></div>
-      <div id="gen-schema-result" style="display:none;">
-        <label style="margin-top:1rem;">Generated Schema (edit if needed)</label>
-        <textarea id="gen-schema-output" style="min-height:200px;"></textarea>
-        <button id="gen-schema-save-btn" class="btn-secondary">Save Schema</button>
+    <!-- EVALUATE -->
+    <div id="evaluate" class="panel">
+      <div class="section">
+        <div class="section-title">Run Evaluation</div>
+        <p class="section-desc">
+          Run extraction on all cached ground truth documents and measure field-level accuracy.
+        </p>
+        <button id="eval-btn">Run Evaluation</button>
+        <div id="eval-status"></div>
+        <div id="eval-result" class="result-box" style="display:none;"></div>
       </div>
     </div>
-    <div class="card">
-      <h2>Available Schemas</h2>
-      <div id="schema-list"></div>
+
+    <!-- DATABASE -->
+    <div id="database" class="panel">
+      <div class="section">
+        <div class="section-title">Connection</div>
+        <p class="section-desc">
+          Configure your database connection for uploading extracted data.
+        </p>
+        <label>Dialect</label>
+        <select id="db-dialect">
+          <option value="mssql" selected>SQL Server</option>
+          <option value="postgres">PostgreSQL</option>
+          <option value="mysql">MySQL</option>
+        </select>
+        <label>Connection String</label>
+        <input type="text" id="db-conn-str" placeholder="mssql+pymssql://user:pass@server/database">
+        <p class="section-desc" style="margin-top:-0.75rem;">
+          <code>mssql+pymssql://user:pass@server/db</code> &nbsp;
+          <code>postgresql://user:pass@host:5432/db</code> &nbsp;
+          <code>mysql://user:pass@host:3306/db</code>
+        </p>
+        <button id="db-test-btn">Test Connection</button>
+        <div id="db-test-status"></div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section">
+        <div class="section-title">SQL Settings</div>
+        <div class="row">
+          <div>
+            <label>Target Table</label>
+            <input type="text" id="db-table-name" placeholder="e.g. Invoices">
+          </div>
+          <div>
+            <label>Schema / Owner</label>
+            <input type="text" id="db-schema-name" value="dbo">
+          </div>
+        </div>
+        <label class="check-label">
+          <input type="checkbox" id="db-include-ddl">
+          Include CREATE TABLE statement
+        </label>
+      </div>
     </div>
-    <div class="card">
-      <h2>Add Custom Schema (JSON)</h2>
-      <label>Document Type Key</label>
-      <input type="text" id="schema-key" placeholder="e.g. purchase_order">
-      <label>JSON Schema</label>
-      <textarea id="schema-body" placeholder='{"type":"object","properties":{...}}'></textarea>
-      <button id="schema-save-btn">Save Schema</button>
-      <div id="schema-status"></div>
+
+    <!-- SCHEMAS -->
+    <div id="schemas" class="panel">
+      <div class="section">
+        <div class="section-title">Describe What You Want</div>
+        <p class="section-desc">
+          Describe the fields you need in plain English. The schema is generated for you.
+        </p>
+        <label>Document Type Key</label>
+        <input type="text" id="gen-schema-key" placeholder="e.g. purchase_order">
+        <label>Describe the fields</label>
+        <textarea id="gen-schema-desc" style="min-height:80px;" placeholder="I need the invoice number, vendor name, invoice date, each line item with description and amount, the subtotal, tax, and total."></textarea>
+        <button id="gen-schema-btn">Generate Schema</button>
+        <div id="gen-schema-status"></div>
+        <div id="gen-schema-result" style="display:none;">
+          <label style="margin-top:1.25rem;">Generated Schema</label>
+          <textarea id="gen-schema-output" style="min-height:200px;"></textarea>
+          <button class="btn-ghost" id="gen-schema-save-btn">Save Schema</button>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section">
+        <div class="section-title">Available Schemas</div>
+        <div id="schema-list"></div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section">
+        <div class="section-title">Add Custom Schema</div>
+        <label>Document Type Key</label>
+        <input type="text" id="schema-key" placeholder="e.g. purchase_order">
+        <label>JSON Schema</label>
+        <textarea id="schema-body" placeholder='{"type":"object","properties":{...}}'></textarea>
+        <button id="schema-save-btn">Save Schema</button>
+        <div id="schema-status"></div>
+      </div>
     </div>
+
   </div>
 
   <script>
     // --- Tab switching ---
-    document.querySelectorAll('.tab').forEach(tab => {
+    document.querySelectorAll('.nav-item').forEach(tab => {
       tab.addEventListener('click', () => {
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.nav-item').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
         tab.classList.add('active');
         document.getElementById(tab.dataset.panel).classList.add('active');
@@ -306,7 +604,7 @@
       }
       const list = document.getElementById('schema-list');
       list.innerHTML = types.map(t =>
-        `<div style="display:flex;justify-content:space-between;padding:0.5rem 0;border-bottom:1px solid var(--border);font-size:0.875rem;">
+        `<div class="schema-row">
           <span>${t.replace(/_/g,' ')}</span>
           <span class="badge">${schemas[t].builtin ? 'built-in' : 'custom'}</span>
         </div>`
@@ -315,7 +613,7 @@
     loadSchemas();
 
     // =====================================================================
-    // EXTRACT — multi-file upload with per-doc review & save-as-ground-truth
+    // EXTRACT
     // =====================================================================
     let extFiles = [];
 
@@ -363,29 +661,28 @@
         card.className = 'doc-result';
         card.innerHTML = `
           <div class="doc-result-header">
-            <h3>${file.name} <span style="color:var(--muted);font-weight:normal;font-size:0.8125rem;">extracting...</span></h3>
+            <h3>${file.name} <span style="color:var(--mid);font-weight:300;font-size:0.8125rem;">extracting...</span></h3>
             <span class="chevron">&#9654;</span>
           </div>
           <div class="doc-result-body">
-            <label style="margin-top:0;">Extracted JSON</label>
-            <textarea class="json-edit" style="width:100%;min-height:200px;font-family:'SF Mono',Monaco,Consolas,monospace;font-size:0.8125rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:0.75rem;margin-bottom:0.75rem;"></textarea>
-            <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+            <label>Extracted JSON</label>
+            <textarea class="json-edit" style="min-height:200px;"></textarea>
+            <div class="actions">
               <button class="save-gt-btn">Save as Ground Truth</button>
-              <button class="gen-sql-btn btn-secondary">Convert to SQL</button>
-              <span class="gt-msg" style="font-size:0.8125rem;color:var(--muted);"></span>
+              <button class="gen-sql-btn btn-ghost">Convert to SQL</button>
+              <span class="gt-msg msg"></span>
             </div>
             <div class="sql-section" style="display:none;">
               <label>Generated SQL</label>
-              <textarea class="sql-edit" style="width:100%;min-height:150px;font-family:'SF Mono',Monaco,Consolas,monospace;font-size:0.8125rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:0.75rem;margin-bottom:0.75rem;"></textarea>
-              <div style="display:flex;gap:0.5rem;align-items:center;">
+              <textarea class="sql-edit" style="min-height:150px;"></textarea>
+              <div class="actions">
                 <button class="exec-sql-btn">Upload to Database</button>
-                <span class="sql-msg" style="font-size:0.8125rem;color:var(--muted);"></span>
+                <span class="sql-msg msg"></span>
               </div>
             </div>
           </div>`;
         resultsList.appendChild(card);
 
-        // Toggle expand/collapse
         card.querySelector('.doc-result-header').addEventListener('click', () => card.classList.toggle('open'));
 
         try {
@@ -393,16 +690,16 @@
           const data = await res.json();
           if (!res.ok) throw new Error(data.detail || 'failed');
 
-          card.querySelector('h3').innerHTML = `${file.name} <span class="badge cached">done</span>`;
-          card.querySelector('textarea').value = JSON.stringify(data.extracted, null, 2);
+          card.querySelector('h3').innerHTML = `${file.name} <span class="badge ok">done</span>`;
+          card.querySelector('.json-edit').value = JSON.stringify(data.extracted, null, 2);
           card.classList.add('open');
 
-          // Wire save-as-ground-truth
+          // Save as Ground Truth
           const saveBtn = card.querySelector('.save-gt-btn');
           const msg = card.querySelector('.gt-msg');
           saveBtn.addEventListener('click', async () => {
-            const corrected = card.querySelector('textarea').value.trim();
-            try { JSON.parse(corrected); } catch { msg.textContent = 'Invalid JSON'; msg.style.color = 'var(--error)'; return; }
+            const corrected = card.querySelector('.json-edit').value.trim();
+            try { JSON.parse(corrected); } catch { msg.textContent = 'Invalid JSON'; msg.style.color = 'var(--rose)'; return; }
             const sfd = new FormData();
             sfd.append('source_file', data.source_file);
             sfd.append('doc_type', data.doc_type);
@@ -412,12 +709,12 @@
               const sd = await sr.json();
               if (!sr.ok) throw new Error(sd.detail);
               msg.textContent = `Saved: ${sd.doc_type}/${sd.name}`;
-              msg.style.color = 'var(--success)';
+              msg.style.color = 'var(--sage)';
               loadGroundTruth();
-            } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--error)'; }
+            } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--rose)'; }
           });
 
-          // Wire Convert to SQL
+          // Convert to SQL
           const sqlBtn = card.querySelector('.gen-sql-btn');
           const sqlSection = card.querySelector('.sql-section');
           const sqlEdit = card.querySelector('.sql-edit');
@@ -443,17 +740,17 @@
               if (!sr.ok) throw new Error(sd.detail);
               sqlEdit.value = sd.sql;
               sqlSection.style.display = 'block';
-            } catch (e) { sqlMsg.textContent = e.message; sqlMsg.style.color = 'var(--error)'; sqlSection.style.display = 'block'; }
+            } catch (e) { sqlMsg.textContent = e.message; sqlMsg.style.color = 'var(--rose)'; sqlSection.style.display = 'block'; }
           });
 
-          // Wire Upload to DB
+          // Upload to DB
           card.querySelector('.exec-sql-btn').addEventListener('click', async () => {
             const connStr = document.getElementById('db-conn-str')?.value.trim();
-            if (!connStr) { sqlMsg.textContent = 'Set connection string in Database tab first'; sqlMsg.style.color = 'var(--warning)'; return; }
+            if (!connStr) { sqlMsg.textContent = 'Set connection string in Database tab'; sqlMsg.style.color = 'var(--amber)'; return; }
             const sql = sqlEdit.value.trim();
             if (!sql) return;
 
-            sqlMsg.textContent = 'Uploading...'; sqlMsg.style.color = 'var(--accent)';
+            sqlMsg.textContent = 'Uploading...'; sqlMsg.style.color = 'var(--silver)';
             const sfd = new FormData();
             sfd.append('sql', sql);
             sfd.append('connection_string', connStr);
@@ -461,27 +758,27 @@
               const sr = await fetch('/api/execute-sql', { method: 'POST', body: sfd });
               const sd = await sr.json();
               if (!sr.ok) throw new Error(sd.detail);
-              sqlMsg.textContent = `Done: ${sd.succeeded}/${sd.total} statements succeeded`;
-              sqlMsg.style.color = sd.succeeded === sd.total ? 'var(--success)' : 'var(--warning)';
-            } catch (e) { sqlMsg.textContent = e.message; sqlMsg.style.color = 'var(--error)'; }
+              sqlMsg.textContent = `${sd.succeeded}/${sd.total} statements succeeded`;
+              sqlMsg.style.color = sd.succeeded === sd.total ? 'var(--sage)' : 'var(--amber)';
+            } catch (e) { sqlMsg.textContent = e.message; sqlMsg.style.color = 'var(--rose)'; }
           });
         } catch (e) {
-          card.querySelector('h3').innerHTML = `${file.name} <span class="badge" style="background:rgba(239,68,68,0.15);color:var(--error);">error</span>`;
-          card.querySelector('textarea').value = `Error: ${e.message}`;
+          card.querySelector('h3').innerHTML = `${file.name} <span class="badge" style="background:var(--rose-bg);color:var(--rose);">error</span>`;
+          card.querySelector('.json-edit').value = `Error: ${e.message}`;
           card.classList.add('open');
         }
         completed++;
         setStatus('ext-status', `Extracted ${completed}/${extFiles.length} document(s)...`, 'loading');
       }
 
-      setStatus('ext-status', `Done — ${completed} document(s) extracted. Review and save below.`, 'success');
+      setStatus('ext-status', `Done. ${completed} document(s) extracted.`, 'success');
       extFiles = [];
       renderExtFileList();
       btn.disabled = true;
     });
 
     // =====================================================================
-    // GROUND TRUTH — batch upload, auto-pair PDFs + JSONs by filename stem
+    // GROUND TRUTH
     // =====================================================================
     let gtFiles = [];
 
@@ -512,10 +809,10 @@
       const el = document.getElementById('gt-pair-list');
       let html = '';
       for (const p of paired) {
-        html += `<div class="pair-row"><span>${p.stem}</span><span class="pair-status badge cached">paired</span></div>`;
+        html += `<div class="pair-row"><span>${p.stem}</span><span class="badge ok">paired</span></div>`;
       }
       for (const u of unpaired) {
-        html += `<div class="pair-row"><span>${u.stem}</span><span class="pair-status badge">${u.type}</span></div>`;
+        html += `<div class="pair-row"><span>${u.stem}</span><span class="badge">${u.type}</span></div>`;
       }
       el.innerHTML = html || '';
       document.getElementById('gt-upload-btn').disabled = paired.length === 0;
@@ -547,21 +844,20 @@
       loadGroundTruth();
     });
 
-    // --- Ground truth list + cache ---
     async function loadGroundTruth() {
       const res = await fetch('/api/ground-truth');
       const docs = await res.json();
       const list = document.getElementById('gt-list');
       if (!docs.length) {
-        list.innerHTML = '<li style="color:var(--muted);">No ground truth documents yet.</li>';
+        list.innerHTML = '<li style="color:var(--mid);">No ground truth documents yet.</li>';
         return;
       }
       list.innerHTML = docs.map(d =>
         `<li>
           <span>${d.doc_type}/${d.name}</span>
           <span>
-            ${d.has_truth_json ? '<span class="badge cached">truth</span>' : ''}
-            ${d.has_cache ? '<span class="badge cached">cached</span>' : '<span class="badge">uncached</span>'}
+            ${d.has_truth_json ? '<span class="badge ok">truth</span>' : ''}
+            ${d.has_cache ? '<span class="badge ok">cached</span>' : '<span class="badge">uncached</span>'}
           </span>
         </li>`
       ).join('');
@@ -647,7 +943,6 @@
       btn.disabled = false;
     });
 
-    // Re-save edited generated schema
     document.getElementById('gen-schema-save-btn').addEventListener('click', async () => {
       const key = document.getElementById('gen-schema-key').value.trim();
       const body = document.getElementById('gen-schema-output').value.trim();
