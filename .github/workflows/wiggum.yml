@@ -1,0 +1,69 @@
+name: Wiggum Cloud Loop
+
+on:
+  workflow_dispatch:  # manual trigger from GitHub UI
+    inputs:
+      branch:
+        description: "Client branch to optimize (e.g. clients/oil-gas-leases)"
+        required: true
+        default: "main"
+      cycles:
+        description: "Number of cycles to run"
+        required: true
+        default: "5"
+      experiments:
+        description: "Experiments per cycle"
+        required: true
+        default: "5"
+      model:
+        description: "Claude model"
+        required: true
+        default: "claude-sonnet-4-20250514"
+        type: choice
+        options:
+          - claude-sonnet-4-20250514
+          - claude-opus-4-20250514
+
+env:
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT: ${{ secrets.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT }}
+  AZURE_DOCUMENT_INTELLIGENCE_KEY: ${{ secrets.AZURE_DOCUMENT_INTELLIGENCE_KEY }}
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+          fetch-depth: 0  # full history for git operations
+
+      - name: Configure git
+        run: |
+          git config user.name "Wiggum Bot"
+          git config user.email "wiggum@autopdf2sqlizer.com"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run Wiggum Cloud
+        run: |
+          uv run wiggum_cloud.py \
+            --cycles ${{ github.event.inputs.cycles }} \
+            --experiments ${{ github.event.inputs.experiments }} \
+            --model ${{ github.event.inputs.model }}
+
+      - name: Push results
+        run: |
+          git push origin ${{ github.event.inputs.branch }}
