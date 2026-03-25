@@ -94,6 +94,18 @@
       height: 8px; background: var(--border); border-radius: 4px; margin-top: 0.5rem; overflow: hidden;
     }
     .accuracy-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.3s; }
+    .doc-result { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; margin-bottom: 0.75rem; }
+    .doc-result-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+    .doc-result-header h3 { font-size: 0.875rem; font-weight: 600; }
+    .doc-result-body { display: none; margin-top: 1rem; }
+    .doc-result.open .doc-result-body { display: block; }
+    .doc-result .chevron { transition: transform 0.15s; color: var(--muted); }
+    .doc-result.open .chevron { transform: rotate(90deg); }
+    .file-chip { display: inline-flex; align-items: center; gap: 0.375rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.25rem 0.625rem; font-size: 0.8125rem; margin: 0.125rem; }
+    .file-chip .remove { cursor: pointer; color: var(--muted); font-weight: bold; }
+    .file-chip .remove:hover { color: var(--error); }
+    .pair-row { display: flex; justify-content: space-between; align-items: center; padding: 0.375rem 0; border-bottom: 1px solid var(--border); font-size: 0.8125rem; }
+    .pair-row .pair-status { font-size: 0.75rem; }
   </style>
 </head>
 <body>
@@ -122,24 +134,14 @@
         </div>
       </div>
       <div class="drop-zone" id="ext-drop">
-        <input type="file" accept=".pdf" id="ext-file">
-        <p>Drop a PDF here or <strong>click to browse</strong></p>
+        <input type="file" accept=".pdf" id="ext-file" multiple>
+        <p>Drop PDFs here or <strong>click to browse</strong> (multiple allowed)</p>
       </div>
-      <button id="ext-btn" disabled>Extract Data</button>
+      <div id="ext-file-list" style="margin-bottom:1rem;"></div>
+      <button id="ext-btn" disabled>Extract All</button>
       <div id="ext-status"></div>
     </div>
-    <div class="card" id="ext-review-card" style="display:none;">
-      <h2>Review & Correct</h2>
-      <p style="color:var(--muted);font-size:0.8125rem;margin-bottom:1rem;">
-        Edit any incorrect fields below, then save as ground truth to build your labeled dataset.
-      </p>
-      <textarea id="ext-result-edit" style="min-height:300px;"></textarea>
-      <div style="display:flex;gap:0.5rem;align-items:center;">
-        <button id="ext-save-gt-btn">Save as Ground Truth</button>
-        <span style="color:var(--muted);font-size:0.8125rem;">Corrected data becomes the source of truth for the Wiggum loop</span>
-      </div>
-      <div id="ext-gt-status"></div>
-    </div>
+    <div id="ext-results-list"></div>
   </div>
 
   <!-- GROUND TRUTH -->
@@ -147,27 +149,17 @@
     <div class="card">
       <h2>Upload Ground Truth</h2>
       <p style="color:var(--muted);font-size:0.8125rem;margin-bottom:1rem;">
-        Upload a PDF alongside its known-correct extraction JSON.
+        Drop PDFs and their matching JSON files. They're auto-paired by filename:<br>
+        <code style="color:var(--accent);">invoice_001.pdf</code> pairs with <code style="color:var(--accent);">invoice_001.json</code>
       </p>
       <label>Document Type</label>
       <select id="gt-doc-type"></select>
-      <div class="row">
-        <div>
-          <label>PDF Document</label>
-          <div class="drop-zone" id="gt-pdf-drop" style="padding:1rem;">
-            <input type="file" accept=".pdf" id="gt-pdf-file">
-            <p>Drop PDF</p>
-          </div>
-        </div>
-        <div>
-          <label>Truth JSON</label>
-          <div class="drop-zone" id="gt-json-drop" style="padding:1rem;">
-            <input type="file" accept=".json" id="gt-json-file">
-            <p>Drop JSON</p>
-          </div>
-        </div>
+      <div class="drop-zone" id="gt-batch-drop">
+        <input type="file" accept=".pdf,.json" id="gt-batch-file" multiple>
+        <p>Drop PDFs + JSON files here (multiple allowed)</p>
       </div>
-      <button id="gt-upload-btn" disabled>Upload Ground Truth</button>
+      <div id="gt-pair-list" style="margin-bottom:1rem;"></div>
+      <button id="gt-upload-btn" disabled>Upload All Pairs</button>
       <div id="gt-status"></div>
     </div>
     <div class="card">
@@ -240,8 +232,15 @@
       });
     });
 
-    // --- Drop zone helpers ---
-    function setupDrop(zoneId, inputId, onFile) {
+    // --- Helpers ---
+    function setStatus(id, msg, type) {
+      const el = document.getElementById(id);
+      el.className = 'status ' + type;
+      el.textContent = msg;
+    }
+    function stem(filename) { return filename.replace(/\.[^.]+$/, ''); }
+
+    function setupMultiDrop(zoneId, inputId, onFiles) {
       const zone = document.getElementById(zoneId);
       const input = document.getElementById(inputId);
       zone.addEventListener('click', () => input.click());
@@ -249,15 +248,9 @@
       zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
       zone.addEventListener('drop', e => {
         e.preventDefault(); zone.classList.remove('drag-over');
-        if (e.dataTransfer.files.length) onFile(e.dataTransfer.files[0], zone);
+        if (e.dataTransfer.files.length) onFiles(Array.from(e.dataTransfer.files));
       });
-      input.addEventListener('change', () => { if (input.files.length) onFile(input.files[0], zone); });
-    }
-
-    function setStatus(id, msg, type) {
-      const el = document.getElementById(id);
-      el.className = 'status ' + type;
-      el.textContent = msg;
+      input.addEventListener('change', () => { if (input.files.length) onFiles(Array.from(input.files)); });
     }
 
     // --- Load schemas into dropdowns ---
@@ -268,7 +261,6 @@
       for (const sel of [document.getElementById('ext-doc-type'), document.getElementById('gt-doc-type')]) {
         sel.innerHTML = types.map(t => `<option value="${t}">${t.replace(/_/g,' ')}</option>`).join('');
       }
-      // Schema list panel
       const list = document.getElementById('schema-list');
       list.innerHTML = types.map(t =>
         `<div style="display:flex;justify-content:space-between;padding:0.5rem 0;border-bottom:1px solid var(--border);font-size:0.875rem;">
@@ -279,100 +271,181 @@
     }
     loadSchemas();
 
-    // --- Extract panel ---
-    let extFile = null;
-    let lastExtraction = null; // store last extraction metadata for save-as-ground-truth
+    // =====================================================================
+    // EXTRACT — multi-file upload with per-doc review & save-as-ground-truth
+    // =====================================================================
+    let extFiles = [];
 
-    setupDrop('ext-drop', 'ext-file', (f, zone) => {
-      extFile = f;
-      zone.querySelector('p').innerHTML = `<span class="filename">${f.name}</span>`;
-      document.getElementById('ext-btn').disabled = false;
+    setupMultiDrop('ext-drop', 'ext-file', files => {
+      const pdfs = files.filter(f => f.name.toLowerCase().endsWith('.pdf'));
+      extFiles = [...extFiles, ...pdfs];
+      renderExtFileList();
+      document.getElementById('ext-btn').disabled = extFiles.length === 0;
     });
+
+    function renderExtFileList() {
+      const el = document.getElementById('ext-file-list');
+      if (!extFiles.length) { el.innerHTML = ''; return; }
+      el.innerHTML = extFiles.map((f, i) =>
+        `<span class="file-chip">${f.name} <span class="remove" data-idx="${i}">&times;</span></span>`
+      ).join('');
+      el.querySelectorAll('.remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+          extFiles.splice(parseInt(btn.dataset.idx), 1);
+          renderExtFileList();
+          document.getElementById('ext-btn').disabled = extFiles.length === 0;
+        });
+      });
+    }
 
     document.getElementById('ext-btn').addEventListener('click', async () => {
-      if (!extFile) return;
+      if (!extFiles.length) return;
       const btn = document.getElementById('ext-btn');
       btn.disabled = true;
-      setStatus('ext-status', 'Extracting... (this may take a minute)', 'loading');
-      document.getElementById('ext-review-card').style.display = 'none';
-
-      const fd = new FormData();
-      fd.append('file', extFile);
-      fd.append('doc_type', document.getElementById('ext-doc-type').value);
+      const docType = document.getElementById('ext-doc-type').value;
       const custom = document.getElementById('ext-custom-schema').value.trim();
-      if (custom) fd.append('custom_schema', custom);
+      const resultsList = document.getElementById('ext-results-list');
+      resultsList.innerHTML = '';
 
-      try {
-        const res = await fetch('/api/extract', { method: 'POST', body: fd });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Extraction failed');
-        setStatus('ext-status', 'Extraction complete — review and correct below', 'success');
+      setStatus('ext-status', `Extracting ${extFiles.length} document(s)...`, 'loading');
 
-        // Show editable results
-        lastExtraction = { source_file: data.source_file, doc_type: data.doc_type };
-        document.getElementById('ext-result-edit').value = JSON.stringify(data.extracted, null, 2);
-        document.getElementById('ext-review-card').style.display = 'block';
-      } catch (e) {
-        setStatus('ext-status', e.message, 'error');
+      let completed = 0;
+      for (const file of extFiles) {
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('doc_type', docType);
+        if (custom) fd.append('custom_schema', custom);
+
+        const card = document.createElement('div');
+        card.className = 'doc-result';
+        card.innerHTML = `
+          <div class="doc-result-header">
+            <h3>${file.name} <span style="color:var(--muted);font-weight:normal;font-size:0.8125rem;">extracting...</span></h3>
+            <span class="chevron">&#9654;</span>
+          </div>
+          <div class="doc-result-body">
+            <textarea style="width:100%;min-height:200px;font-family:'SF Mono',Monaco,Consolas,monospace;font-size:0.8125rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:0.75rem;margin-bottom:0.75rem;"></textarea>
+            <div style="display:flex;gap:0.5rem;align-items:center;">
+              <button class="save-gt-btn">Save as Ground Truth</button>
+              <span class="gt-msg" style="font-size:0.8125rem;color:var(--muted);"></span>
+            </div>
+          </div>`;
+        resultsList.appendChild(card);
+
+        // Toggle expand/collapse
+        card.querySelector('.doc-result-header').addEventListener('click', () => card.classList.toggle('open'));
+
+        try {
+          const res = await fetch('/api/extract', { method: 'POST', body: fd });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || 'failed');
+
+          card.querySelector('h3').innerHTML = `${file.name} <span class="badge cached">done</span>`;
+          card.querySelector('textarea').value = JSON.stringify(data.extracted, null, 2);
+          card.classList.add('open');
+
+          // Wire save-as-ground-truth
+          const saveBtn = card.querySelector('.save-gt-btn');
+          const msg = card.querySelector('.gt-msg');
+          saveBtn.addEventListener('click', async () => {
+            const corrected = card.querySelector('textarea').value.trim();
+            try { JSON.parse(corrected); } catch { msg.textContent = 'Invalid JSON'; msg.style.color = 'var(--error)'; return; }
+            const sfd = new FormData();
+            sfd.append('source_file', data.source_file);
+            sfd.append('doc_type', data.doc_type);
+            sfd.append('corrected_json', corrected);
+            try {
+              const sr = await fetch('/api/save-as-ground-truth', { method: 'POST', body: sfd });
+              const sd = await sr.json();
+              if (!sr.ok) throw new Error(sd.detail);
+              msg.textContent = `Saved: ${sd.doc_type}/${sd.name}`;
+              msg.style.color = 'var(--success)';
+              loadGroundTruth();
+            } catch (e) { msg.textContent = e.message; msg.style.color = 'var(--error)'; }
+          });
+        } catch (e) {
+          card.querySelector('h3').innerHTML = `${file.name} <span class="badge" style="background:rgba(239,68,68,0.15);color:var(--error);">error</span>`;
+          card.querySelector('textarea').value = `Error: ${e.message}`;
+          card.classList.add('open');
+        }
+        completed++;
+        setStatus('ext-status', `Extracted ${completed}/${extFiles.length} document(s)...`, 'loading');
       }
-      btn.disabled = false;
+
+      setStatus('ext-status', `Done — ${completed} document(s) extracted. Review and save below.`, 'success');
+      extFiles = [];
+      renderExtFileList();
+      btn.disabled = true;
     });
 
-    // Save corrected extraction as ground truth
-    document.getElementById('ext-save-gt-btn').addEventListener('click', async () => {
-      if (!lastExtraction) return;
-      const corrected = document.getElementById('ext-result-edit').value.trim();
-      try {
-        JSON.parse(corrected); // validate
-      } catch {
-        setStatus('ext-gt-status', 'Invalid JSON — fix the syntax and try again', 'error');
-        return;
+    // =====================================================================
+    // GROUND TRUTH — batch upload, auto-pair PDFs + JSONs by filename stem
+    // =====================================================================
+    let gtFiles = [];
+
+    setupMultiDrop('gt-batch-drop', 'gt-batch-file', files => {
+      gtFiles = [...gtFiles, ...files];
+      renderGtPairs();
+    });
+
+    function getGtPairs() {
+      const pdfs = {}, jsons = {};
+      for (const f of gtFiles) {
+        const s = stem(f.name);
+        if (f.name.toLowerCase().endsWith('.pdf')) pdfs[s] = f;
+        else if (f.name.toLowerCase().endsWith('.json')) jsons[s] = f;
       }
-
-      const fd = new FormData();
-      fd.append('source_file', lastExtraction.source_file);
-      fd.append('doc_type', lastExtraction.doc_type);
-      fd.append('corrected_json', corrected);
-
-      try {
-        const res = await fetch('/api/save-as-ground-truth', { method: 'POST', body: fd });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Save failed');
-        setStatus('ext-gt-status', `Saved as ground truth: ${data.doc_type}/${data.name}`, 'success');
-        loadGroundTruth();
-      } catch (e) {
-        setStatus('ext-gt-status', e.message, 'error');
+      const paired = [], unpaired = [];
+      const allStems = new Set([...Object.keys(pdfs), ...Object.keys(jsons)]);
+      for (const s of allStems) {
+        if (pdfs[s] && jsons[s]) paired.push({ stem: s, pdf: pdfs[s], json: jsons[s] });
+        else if (pdfs[s]) unpaired.push({ stem: s, file: pdfs[s], type: 'pdf (no JSON)' });
+        else unpaired.push({ stem: s, file: jsons[s], type: 'json (no PDF)' });
       }
-    });
+      return { paired, unpaired };
+    }
 
-    // --- Ground truth panel ---
-    let gtPdf = null, gtJson = null;
-    setupDrop('gt-pdf-drop', 'gt-pdf-file', (f, zone) => {
-      gtPdf = f; zone.querySelector('p').innerHTML = `<span class="filename">${f.name}</span>`;
-      document.getElementById('gt-upload-btn').disabled = !(gtPdf && gtJson);
-    });
-    setupDrop('gt-json-drop', 'gt-json-file', (f, zone) => {
-      gtJson = f; zone.querySelector('p').innerHTML = `<span class="filename">${f.name}</span>`;
-      document.getElementById('gt-upload-btn').disabled = !(gtPdf && gtJson);
-    });
+    function renderGtPairs() {
+      const { paired, unpaired } = getGtPairs();
+      const el = document.getElementById('gt-pair-list');
+      let html = '';
+      for (const p of paired) {
+        html += `<div class="pair-row"><span>${p.stem}</span><span class="pair-status badge cached">paired</span></div>`;
+      }
+      for (const u of unpaired) {
+        html += `<div class="pair-row"><span>${u.stem}</span><span class="pair-status badge">${u.type}</span></div>`;
+      }
+      el.innerHTML = html || '';
+      document.getElementById('gt-upload-btn').disabled = paired.length === 0;
+    }
 
     document.getElementById('gt-upload-btn').addEventListener('click', async () => {
-      if (!gtPdf || !gtJson) return;
-      const fd = new FormData();
-      fd.append('pdf', gtPdf);
-      fd.append('truth_json', gtJson);
-      fd.append('doc_type', document.getElementById('gt-doc-type').value);
-      try {
-        const res = await fetch('/api/ground-truth', { method: 'POST', body: fd });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Upload failed');
-        setStatus('gt-status', `Uploaded: ${data.name}`, 'success');
-        loadGroundTruth();
-      } catch (e) {
-        setStatus('gt-status', e.message, 'error');
+      const { paired } = getGtPairs();
+      if (!paired.length) return;
+      const docType = document.getElementById('gt-doc-type').value;
+      const btn = document.getElementById('gt-upload-btn');
+      btn.disabled = true;
+      setStatus('gt-status', `Uploading ${paired.length} pair(s)...`, 'loading');
+
+      let ok = 0;
+      for (const p of paired) {
+        const fd = new FormData();
+        fd.append('pdf', p.pdf);
+        fd.append('truth_json', p.json);
+        fd.append('doc_type', docType);
+        try {
+          const res = await fetch('/api/ground-truth', { method: 'POST', body: fd });
+          if (res.ok) ok++;
+        } catch {}
       }
+
+      setStatus('gt-status', `Uploaded ${ok}/${paired.length} ground truth pairs`, ok === paired.length ? 'success' : 'error');
+      gtFiles = [];
+      renderGtPairs();
+      loadGroundTruth();
     });
 
+    // --- Ground truth list + cache ---
     async function loadGroundTruth() {
       const res = await fetch('/api/ground-truth');
       const docs = await res.json();
