@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Medical Form",
+  "description": "Standard medical/healthcare form extraction schema",
+  "type": "object",
+  "properties": {
+    "patient_name": {
+      "type": "string",
+      "description": "Full name of the patient"
+    },
+    "date_of_birth": {
+      "type": "string",
+      "description": "Patient date of birth (YYYY-MM-DD)"
+    },
+    "patient_id": {
+      "type": "string",
+      "description": "Patient ID or medical record number"
+    },
+    "insurance_id": {
+      "type": "string",
+      "description": "Insurance policy or member ID"
+    },
+    "insurance_provider": {
+      "type": "string",
+      "description": "Name of insurance provider"
+    },
+    "provider_name": {
+      "type": "string",
+      "description": "Name of the healthcare provider or physician"
+    },
+    "facility_name": {
+      "type": "string",
+      "description": "Name of the medical facility"
+    },
+    "date_of_service": {
+      "type": "string",
+      "description": "Date of service (YYYY-MM-DD)"
+    },
+    "diagnosis_codes": {
+      "type": "array",
+      "description": "ICD diagnosis codes",
+      "items": { "type": "string" }
+    },
+    "procedure_codes": {
+      "type": "array",
+      "description": "CPT procedure codes",
+      "items": { "type": "string" }
+    },
+    "total_charges": {
+      "type": "number",
+      "description": "Total charges"
+    },
+    "amount_paid": {
+      "type": "number",
+      "description": "Amount already paid"
+    },
+    "amount_due": {
+      "type": "number",
+      "description": "Remaining amount due"
+    }
+  }
+}

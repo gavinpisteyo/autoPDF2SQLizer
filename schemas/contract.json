@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Contract",
+  "description": "Standard contract extraction schema",
+  "type": "object",
+  "properties": {
+    "contract_number": {
+      "type": "string",
+      "description": "Contract number or reference ID"
+    },
+    "title": {
+      "type": "string",
+      "description": "Contract title or subject"
+    },
+    "effective_date": {
+      "type": "string",
+      "description": "Date the contract takes effect (YYYY-MM-DD)"
+    },
+    "expiration_date": {
+      "type": "string",
+      "description": "Date the contract expires (YYYY-MM-DD)"
+    },
+    "party_a_name": {
+      "type": "string",
+      "description": "Name of the first party"
+    },
+    "party_a_address": {
+      "type": "string",
+      "description": "Address of the first party"
+    },
+    "party_b_name": {
+      "type": "string",
+      "description": "Name of the second party"
+    },
+    "party_b_address": {
+      "type": "string",
+      "description": "Address of the second party"
+    },
+    "contract_value": {
+      "type": "number",
+      "description": "Total contract value"
+    },
+    "currency": {
+      "type": "string",
+      "description": "Currency code"
+    },
+    "governing_law": {
+      "type": "string",
+      "description": "Governing law jurisdiction (e.g. State of California)"
+    },
+    "terms_summary": {
+      "type": "string",
+      "description": "Brief summary of key terms"
+    }
+  }
+}

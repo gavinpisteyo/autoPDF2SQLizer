@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>autoPDF2SQLizer</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e4e4e7;
+      --muted: #71717a;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --success: #22c55e;
+      --error: #ef4444;
+      --warning: #f59e0b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg); color: var(--text);
+      line-height: 1.6; padding: 2rem; max-width: 960px; margin: 0 auto;
+    }
+    h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.25rem; }
+    h1 span { color: var(--accent); }
+    .subtitle { color: var(--muted); font-size: 0.875rem; margin-bottom: 2rem; }
+    .tabs {
+      display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem;
+    }
+    .tab {
+      padding: 0.625rem 1.25rem; cursor: pointer; font-size: 0.875rem;
+      color: var(--muted); border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem;
+    }
+    .card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; }
+    label { display: block; font-size: 0.8125rem; color: var(--muted); margin-bottom: 0.375rem; }
+    select, input[type="text"], textarea {
+      width: 100%; padding: 0.5rem 0.75rem; font-size: 0.875rem;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text); margin-bottom: 1rem; font-family: inherit;
+    }
+    textarea { min-height: 120px; font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 0.8125rem; }
+    select:focus, input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+    .drop-zone {
+      border: 2px dashed var(--border); border-radius: 8px; padding: 2rem;
+      text-align: center; color: var(--muted); cursor: pointer; transition: all 0.15s;
+      margin-bottom: 1rem;
+    }
+    .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); color: var(--text); }
+    .drop-zone input { display: none; }
+    .drop-zone .filename { color: var(--accent); font-weight: 500; }
+    button {
+      padding: 0.5rem 1.25rem; font-size: 0.875rem; font-weight: 500;
+      background: var(--accent); color: white; border: none; border-radius: 6px;
+      cursor: pointer; transition: background 0.15s;
+    }
+    button:hover { background: var(--accent-hover); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+    .btn-secondary:hover { background: var(--border); }
+    .result-box {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 1rem; font-family: 'SF Mono', Monaco, Consolas, monospace;
+      font-size: 0.8125rem; white-space: pre-wrap; overflow-x: auto;
+      max-height: 500px; overflow-y: auto; margin-top: 1rem;
+    }
+    .status { padding: 0.375rem 0.75rem; border-radius: 4px; font-size: 0.8125rem; margin-top: 1rem; }
+    .status.success { background: rgba(34,197,94,0.1); color: var(--success); }
+    .status.error { background: rgba(239,68,68,0.1); color: var(--error); }
+    .status.loading { background: rgba(99,102,241,0.1); color: var(--accent); }
+    .ground-truth-list { list-style: none; }
+    .ground-truth-list li {
+      padding: 0.5rem 0; border-bottom: 1px solid var(--border);
+      font-size: 0.875rem; display: flex; justify-content: space-between;
+    }
+    .badge {
+      font-size: 0.75rem; padding: 0.125rem 0.5rem; border-radius: 4px;
+      background: var(--border); color: var(--muted);
+    }
+    .badge.cached { background: rgba(34,197,94,0.15); color: var(--success); }
+    .row { display: flex; gap: 1rem; }
+    .row > * { flex: 1; }
+    .accuracy-bar {
+      height: 8px; background: var(--border); border-radius: 4px; margin-top: 0.5rem; overflow: hidden;
+    }
+    .accuracy-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.3s; }
+  </style>
+</head>
+<body>
+  <h1>auto<span>PDF2SQL</span>izer</h1>
+  <p class="subtitle">Upload PDFs. Extract structured data. Iterate to 100% accuracy.</p>
+
+  <div class="tabs">
+    <div class="tab active" data-panel="extract">Extract</div>
+    <div class="tab" data-panel="ground-truth">Ground Truth</div>
+    <div class="tab" data-panel="evaluate">Evaluate</div>
+    <div class="tab" data-panel="schemas">Schemas</div>
+  </div>
+
+  <!-- EXTRACT -->
+  <div id="extract" class="panel active">
+    <div class="card">
+      <h2>Upload & Extract</h2>
+      <div class="row">
+        <div>
+          <label>Document Type</label>
+          <select id="ext-doc-type"></select>
+        </div>
+        <div>
+          <label>Custom Schema (optional JSON)</label>
+          <input type="text" id="ext-custom-schema" placeholder='{"properties":{...}}'>
+        </div>
+      </div>
+      <div class="drop-zone" id="ext-drop">
+        <input type="file" accept=".pdf" id="ext-file">
+        <p>Drop a PDF here or <strong>click to browse</strong></p>
+      </div>
+      <button id="ext-btn" disabled>Extract Data</button>
+      <div id="ext-status"></div>
+      <div id="ext-result" class="result-box" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- GROUND TRUTH -->
+  <div id="ground-truth" class="panel">
+    <div class="card">
+      <h2>Upload Ground Truth</h2>
+      <p style="color:var(--muted);font-size:0.8125rem;margin-bottom:1rem;">
+        Upload a PDF alongside its known-correct extraction JSON.
+      </p>
+      <label>Document Type</label>
+      <select id="gt-doc-type"></select>
+      <div class="row">
+        <div>
+          <label>PDF Document</label>
+          <div class="drop-zone" id="gt-pdf-drop" style="padding:1rem;">
+            <input type="file" accept=".pdf" id="gt-pdf-file">
+            <p>Drop PDF</p>
+          </div>
+        </div>
+        <div>
+          <label>Truth JSON</label>
+          <div class="drop-zone" id="gt-json-drop" style="padding:1rem;">
+            <input type="file" accept=".json" id="gt-json-file">
+            <p>Drop JSON</p>
+          </div>
+        </div>
+      </div>
+      <button id="gt-upload-btn" disabled>Upload Ground Truth</button>
+      <div id="gt-status"></div>
+    </div>
+    <div class="card">
+      <h2>Ground Truth Documents</h2>
+      <ul class="ground-truth-list" id="gt-list">
+        <li style="color:var(--muted);">Loading...</li>
+      </ul>
+      <div style="margin-top:1rem;">
+        <button class="btn-secondary" id="gt-cache-btn">Cache All (Run Doc Intel)</button>
+        <span id="gt-cache-status" style="margin-left:0.5rem;font-size:0.8125rem;color:var(--muted);"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- EVALUATE -->
+  <div id="evaluate" class="panel">
+    <div class="card">
+      <h2>Run Evaluation</h2>
+      <p style="color:var(--muted);font-size:0.8125rem;margin-bottom:1rem;">
+        Run extraction on all cached ground truth documents and score accuracy.
+      </p>
+      <button id="eval-btn">Run Evaluation</button>
+      <div id="eval-status"></div>
+      <div id="eval-result" class="result-box" style="display:none;"></div>
+    </div>
+  </div>
+
+  <!-- SCHEMAS -->
+  <div id="schemas" class="panel">
+    <div class="card">
+      <h2>Available Schemas</h2>
+      <div id="schema-list"></div>
+    </div>
+    <div class="card">
+      <h2>Add Custom Schema</h2>
+      <label>Document Type Key</label>
+      <input type="text" id="schema-key" placeholder="e.g. purchase_order">
+      <label>JSON Schema</label>
+      <textarea id="schema-body" placeholder='{"type":"object","properties":{...}}'></textarea>
+      <button id="schema-save-btn">Save Schema</button>
+      <div id="schema-status"></div>
+    </div>
+  </div>
+
+  <script>
+    // --- Tab switching ---
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(tab.dataset.panel).classList.add('active');
+      });
+    });
+
+    // --- Drop zone helpers ---
+    function setupDrop(zoneId, inputId, onFile) {
+      const zone = document.getElementById(zoneId);
+      const input = document.getElementById(inputId);
+      zone.addEventListener('click', () => input.click());
+      zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+      zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+      zone.addEventListener('drop', e => {
+        e.preventDefault(); zone.classList.remove('drag-over');
+        if (e.dataTransfer.files.length) onFile(e.dataTransfer.files[0], zone);
+      });
+      input.addEventListener('change', () => { if (input.files.length) onFile(input.files[0], zone); });
+    }
+
+    function setStatus(id, msg, type) {
+      const el = document.getElementById(id);
+      el.className = 'status ' + type;
+      el.textContent = msg;
+    }
+
+    // --- Load schemas into dropdowns ---
+    async function loadSchemas() {
+      const res = await fetch('/api/schemas');
+      const schemas = await res.json();
+      const types = Object.keys(schemas);
+      for (const sel of [document.getElementById('ext-doc-type'), document.getElementById('gt-doc-type')]) {
+        sel.innerHTML = types.map(t => `<option value="${t}">${t.replace(/_/g,' ')}</option>`).join('');
+      }
+      // Schema list panel
+      const list = document.getElementById('schema-list');
+      list.innerHTML = types.map(t =>
+        `<div style="display:flex;justify-content:space-between;padding:0.5rem 0;border-bottom:1px solid var(--border);font-size:0.875rem;">
+          <span>${t.replace(/_/g,' ')}</span>
+          <span class="badge">${schemas[t].builtin ? 'built-in' : 'custom'}</span>
+        </div>`
+      ).join('');
+    }
+    loadSchemas();
+
+    // --- Extract panel ---
+    let extFile = null;
+    setupDrop('ext-drop', 'ext-file', (f, zone) => {
+      extFile = f;
+      zone.querySelector('p').innerHTML = `<span class="filename">${f.name}</span>`;
+      document.getElementById('ext-btn').disabled = false;
+    });
+
+    document.getElementById('ext-btn').addEventListener('click', async () => {
+      if (!extFile) return;
+      const btn = document.getElementById('ext-btn');
+      btn.disabled = true;
+      setStatus('ext-status', 'Extracting... (this may take a minute)', 'loading');
+      document.getElementById('ext-result').style.display = 'none';
+
+      const fd = new FormData();
+      fd.append('file', extFile);
+      fd.append('doc_type', document.getElementById('ext-doc-type').value);
+      const custom = document.getElementById('ext-custom-schema').value.trim();
+      if (custom) fd.append('custom_schema', custom);
+
+      try {
+        const res = await fetch('/api/extract', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Extraction failed');
+        setStatus('ext-status', 'Extraction complete', 'success');
+        const box = document.getElementById('ext-result');
+        box.style.display = 'block';
+        box.textContent = JSON.stringify(data.extracted, null, 2);
+      } catch (e) {
+        setStatus('ext-status', e.message, 'error');
+      }
+      btn.disabled = false;
+    });
+
+    // --- Ground truth panel ---
+    let gtPdf = null, gtJson = null;
+    setupDrop('gt-pdf-drop', 'gt-pdf-file', (f, zone) => {
+      gtPdf = f; zone.querySelector('p').innerHTML = `<span class="filename">${f.name}</span>`;
+      document.getElementById('gt-upload-btn').disabled = !(gtPdf && gtJson);
+    });
+    setupDrop('gt-json-drop', 'gt-json-file', (f, zone) => {
+      gtJson = f; zone.querySelector('p').innerHTML = `<span class="filename">${f.name}</span>`;
+      document.getElementById('gt-upload-btn').disabled = !(gtPdf && gtJson);
+    });
+
+    document.getElementById('gt-upload-btn').addEventListener('click', async () => {
+      if (!gtPdf || !gtJson) return;
+      const fd = new FormData();
+      fd.append('pdf', gtPdf);
+      fd.append('truth_json', gtJson);
+      fd.append('doc_type', document.getElementById('gt-doc-type').value);
+      try {
+        const res = await fetch('/api/ground-truth', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Upload failed');
+        setStatus('gt-status', `Uploaded: ${data.name}`, 'success');
+        loadGroundTruth();
+      } catch (e) {
+        setStatus('gt-status', e.message, 'error');
+      }
+    });
+
+    async function loadGroundTruth() {
+      const res = await fetch('/api/ground-truth');
+      const docs = await res.json();
+      const list = document.getElementById('gt-list');
+      if (!docs.length) {
+        list.innerHTML = '<li style="color:var(--muted);">No ground truth documents yet.</li>';
+        return;
+      }
+      list.innerHTML = docs.map(d =>
+        `<li>
+          <span>${d.doc_type}/${d.name}</span>
+          <span>
+            ${d.has_truth_json ? '<span class="badge cached">truth</span>' : ''}
+            ${d.has_cache ? '<span class="badge cached">cached</span>' : '<span class="badge">uncached</span>'}
+          </span>
+        </li>`
+      ).join('');
+    }
+    loadGroundTruth();
+
+    document.getElementById('gt-cache-btn').addEventListener('click', async () => {
+      const stat = document.getElementById('gt-cache-status');
+      stat.textContent = 'Running Doc Intel on uncached docs...';
+      try {
+        const res = await fetch('/api/cache', { method: 'POST' });
+        const data = await res.json();
+        const newlyCached = data.filter(d => d.status === 'cached').length;
+        stat.textContent = `Done. ${newlyCached} newly cached, ${data.length - newlyCached} already cached.`;
+        loadGroundTruth();
+      } catch (e) {
+        stat.textContent = 'Error: ' + e.message;
+      }
+    });
+
+    // --- Evaluate panel ---
+    document.getElementById('eval-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('eval-btn');
+      btn.disabled = true;
+      setStatus('eval-status', 'Running evaluation...', 'loading');
+      document.getElementById('eval-result').style.display = 'none';
+      try {
+        const res = await fetch('/api/evaluate', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Evaluation failed');
+        setStatus('eval-status', data.returncode === 0 ? 'Evaluation complete' : 'Evaluation finished with errors', data.returncode === 0 ? 'success' : 'error');
+        const box = document.getElementById('eval-result');
+        box.style.display = 'block';
+        box.textContent = data.stdout + (data.stderr ? '\n--- stderr ---\n' + data.stderr : '');
+      } catch (e) {
+        setStatus('eval-status', e.message, 'error');
+      }
+      btn.disabled = false;
+    });
+
+    // --- Schema save ---
+    document.getElementById('schema-save-btn').addEventListener('click', async () => {
+      const key = document.getElementById('schema-key').value.trim();
+      const body = document.getElementById('schema-body').value.trim();
+      if (!key || !body) return setStatus('schema-status', 'Fill in both fields', 'error');
+      try {
+        const schema = JSON.parse(body);
+        const res = await fetch(`/api/schemas/${key}`, {
+          method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(schema)
+        });
+        if (!res.ok) throw new Error('Save failed');
+        setStatus('schema-status', `Schema "${key}" saved`, 'success');
+        loadSchemas();
+      } catch (e) {
+        setStatus('schema-status', e.message, 'error');
+      }
+    });
+  </script>
+</body>
+</html>

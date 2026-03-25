@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Financial Statement",
+  "description": "Standard financial statement extraction schema",
+  "type": "object",
+  "properties": {
+    "company_name": {
+      "type": "string",
+      "description": "Name of the company"
+    },
+    "statement_type": {
+      "type": "string",
+      "description": "Type of statement (income_statement, balance_sheet, cash_flow)"
+    },
+    "period_start": {
+      "type": "string",
+      "description": "Start of reporting period (YYYY-MM-DD)"
+    },
+    "period_end": {
+      "type": "string",
+      "description": "End of reporting period (YYYY-MM-DD)"
+    },
+    "currency": {
+      "type": "string",
+      "description": "Currency code"
+    },
+    "revenue": {
+      "type": "number",
+      "description": "Total revenue / net sales"
+    },
+    "cost_of_goods_sold": {
+      "type": "number",
+      "description": "Cost of goods sold / cost of revenue"
+    },
+    "gross_profit": {
+      "type": "number",
+      "description": "Gross profit"
+    },
+    "operating_expenses": {
+      "type": "number",
+      "description": "Total operating expenses"
+    },
+    "net_income": {
+      "type": "number",
+      "description": "Net income / net profit"
+    },
+    "total_assets": {
+      "type": "number",
+      "description": "Total assets (balance sheet)"
+    },
+    "total_liabilities": {
+      "type": "number",
+      "description": "Total liabilities (balance sheet)"
+    },
+    "total_equity": {
+      "type": "number",
+      "description": "Total shareholders equity (balance sheet)"
+    }
+  }
+}

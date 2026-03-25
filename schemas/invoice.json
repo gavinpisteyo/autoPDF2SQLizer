@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Invoice",
+  "description": "Standard invoice extraction schema",
+  "type": "object",
+  "properties": {
+    "invoice_number": {
+      "type": "string",
+      "description": "Invoice number or reference ID"
+    },
+    "invoice_date": {
+      "type": "string",
+      "description": "Date the invoice was issued (YYYY-MM-DD)"
+    },
+    "due_date": {
+      "type": "string",
+      "description": "Payment due date (YYYY-MM-DD)"
+    },
+    "vendor_name": {
+      "type": "string",
+      "description": "Name of the vendor or seller"
+    },
+    "vendor_address": {
+      "type": "string",
+      "description": "Full address of the vendor"
+    },
+    "customer_name": {
+      "type": "string",
+      "description": "Name of the customer or buyer"
+    },
+    "customer_address": {
+      "type": "string",
+      "description": "Full address of the customer"
+    },
+    "line_items": {
+      "type": "array",
+      "description": "Individual line items on the invoice",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": { "type": "string" },
+          "quantity": { "type": "number" },
+          "unit_price": { "type": "number" },
+          "amount": { "type": "number" }
+        }
+      }
+    },
+    "subtotal": {
+      "type": "number",
+      "description": "Subtotal before tax"
+    },
+    "tax": {
+      "type": "number",
+      "description": "Tax amount"
+    },
+    "total": {
+      "type": "number",
+      "description": "Total amount due"
+    },
+    "currency": {
+      "type": "string",
+      "description": "Currency code (e.g. USD, EUR, GBP)"
+    }
+  }
+}

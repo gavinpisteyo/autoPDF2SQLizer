@@ -1,0 +1,13 @@
+[project]
+name = "autopdf2sqlizer"
+version = "0.1.0"
+description = "Autonomous PDF to structured data extraction with iterative accuracy optimization"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.40.0",
+    "azure-ai-documentintelligence>=1.0.0",
+    "fastapi>=0.115.0",
+    "python-dotenv>=1.0.0",
+    "python-multipart>=0.0.9",
+    "uvicorn[standard]>=0.30.0",
+]
