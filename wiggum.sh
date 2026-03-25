@@ -11,20 +11,42 @@
 # Bad changes are reverted. Next agent sees only the current best code.
 #
 # Usage:
-#   ./wiggum.sh                     # run forever
-#   ./wiggum.sh 10                  # run 10 agent cycles
-#   EXPERIMENTS_PER_AGENT=3 ./wiggum.sh   # 3 experiments per agent (default: 5)
+#   ./wiggum.sh                                 # run on current branch forever
+#   ./wiggum.sh 10                              # run 10 agent cycles
+#   ./wiggum.sh --instance oil-gas-leases       # run on a specific client branch
+#   ./wiggum.sh --instance fintech-checks 20    # 20 cycles on fintech branch
+#   EXPERIMENTS_PER_AGENT=3 ./wiggum.sh         # 3 experiments per agent (default: 5)
 # =============================================================================
 
 set -euo pipefail
 
-MAX_CYCLES="${1:-0}"  # 0 = infinite
+# Parse --instance flag
+INSTANCE=""
+MAX_CYCLES=0
+for arg in "$@"; do
+    if [ "$arg" = "--instance" ]; then
+        shift; INSTANCE="$1"; shift
+    elif [[ "$arg" =~ ^[0-9]+$ ]]; then
+        MAX_CYCLES="$arg"; shift
+    fi
+done
+
 EXPERIMENTS_PER_AGENT="${EXPERIMENTS_PER_AGENT:-5}"
 CYCLE=0
+
+# Switch to client branch if specified
+if [ -n "$INSTANCE" ]; then
+    BRANCH="clients/${INSTANCE}"
+    echo "[wiggum] Switching to instance branch: ${BRANCH}"
+    git checkout "${BRANCH}" || { echo "Error: branch ${BRANCH} not found. Run: ./instance.sh create ${INSTANCE}"; exit 1; }
+fi
+
+CURRENT_BRANCH=$(git branch --show-current)
 
 echo "========================================"
 echo "  Wiggum Loop — autoPDF2SQLizer"
 echo "========================================"
+echo "  Branch: $CURRENT_BRANCH"
 echo "  Experiments per agent: $EXPERIMENTS_PER_AGENT"
 echo "  Max cycles: $([ "$MAX_CYCLES" -eq 0 ] && echo 'infinite' || echo "$MAX_CYCLES")"
 echo "========================================"
