@@ -1,8 +1,7 @@
 name: Deploy to Azure App Service
 
+# Only runs manually — automatic deploys disabled until Azure credentials are configured
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 env:
@@ -50,9 +49,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Deploy to App Service
-        uses: azure/webapps-deploy@v3
+      # --- Deploy ---
+      - name: Login to Azure
+        uses: azure/login@v2
         with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          startup-command: "gunicorn -w 2 -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:8000 --timeout 120"
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to App Service
+        run: az webapp up --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group n8n-AI-Automations --location centralus

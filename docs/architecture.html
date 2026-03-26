@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>autoPDF2SQLizer — Architecture</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400&family=Montserrat:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #161616;
+      --surface: #1e1e1e;
+      --border: rgba(255,255,255,0.08);
+      --text: #d7d7d7;
+      --muted: #525252;
+      --cloud: #f7f7f7;
+      --coral: #FF4F5E;
+      --sage: #5a8a7a;
+      --blue: #5B8DEF;
+      --purple: #9B7FE6;
+      --amber: #D4A556;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'IBM Plex Sans', sans-serif; background: var(--bg); color: var(--text); padding: 3rem 2rem; }
+    .page { max-width: 1200px; margin: 0 auto; }
+    h1 { font-family: 'Montserrat', sans-serif; font-size: 1.5rem; font-weight: 600; color: var(--cloud); margin-bottom: 0.25rem; }
+    h1 span { color: var(--coral); font-weight: 500; }
+    .subtitle { color: var(--muted); font-size: 0.875rem; margin-bottom: 3rem; }
+    h2 { font-family: 'Montserrat', sans-serif; font-size: 1rem; font-weight: 600; color: var(--cloud); margin: 3rem 0 1.5rem; padding-top: 2rem; border-top: 1px solid var(--border); }
+    h2:first-of-type { border-top: none; margin-top: 0; padding-top: 0; }
+
+    /* Diagram containers */
+    .diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 2rem; margin-bottom: 2rem; overflow-x: auto; }
+    .diagram-title { font-family: 'Montserrat', sans-serif; font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 1.5rem; }
+
+    /* Nodes */
+    .row { display: flex; gap: 1.5rem; justify-content: center; align-items: flex-start; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    .node {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+      padding: 1rem 1.25rem; min-width: 180px; max-width: 260px; text-align: center;
+      position: relative;
+    }
+    .node-label { font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.5rem; }
+    .node-name { font-family: 'Montserrat', sans-serif; font-size: 0.875rem; font-weight: 600; color: var(--cloud); margin-bottom: 0.25rem; }
+    .node-detail { font-size: 0.75rem; color: var(--muted); line-height: 1.5; }
+    .node-url { font-family: 'IBM Plex Mono', monospace; font-size: 0.6875rem; color: var(--coral); margin-top: 0.375rem; word-break: break-all; }
+
+    .node.azure { border-color: rgba(91,141,239,0.3); }
+    .node.azure .node-label { color: var(--blue); }
+    .node.github { border-color: rgba(155,127,230,0.3); }
+    .node.github .node-label { color: var(--purple); }
+    .node.external { border-color: rgba(212,165,86,0.3); }
+    .node.external .node-label { color: var(--amber); }
+    .node.local { border-color: rgba(90,138,122,0.3); }
+    .node.local .node-label { color: var(--sage); }
+    .node.coral { border-color: rgba(255,79,94,0.3); }
+    .node.coral .node-label { color: var(--coral); }
+
+    .node.wide { max-width: 400px; min-width: 300px; }
+    .node.full { max-width: 100%; min-width: 0; flex: 1; }
+
+    /* Arrows */
+    .arrow { text-align: center; margin: 0.75rem 0; color: var(--muted); font-size: 0.75rem; }
+    .arrow .line { color: var(--muted); font-size: 1.25rem; line-height: 1; }
+    .arrow-h { display: inline-block; color: var(--muted); font-size: 1.25rem; padding: 0 0.5rem; vertical-align: middle; }
+
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; margin: 1rem 0; }
+    th { text-align: left; font-weight: 600; color: var(--cloud); padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    td { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: top; }
+    td:first-child { color: var(--cloud); font-weight: 500; }
+    .tag { display: inline-block; font-size: 0.6875rem; font-weight: 500; padding: 0.125rem 0.5rem; border-radius: 3px; margin-right: 0.25rem; }
+    .tag-azure { background: rgba(91,141,239,0.15); color: var(--blue); }
+    .tag-github { background: rgba(155,127,230,0.15); color: var(--purple); }
+    .tag-ext { background: rgba(212,165,86,0.15); color: var(--amber); }
+    .tag-local { background: rgba(90,138,122,0.15); color: var(--sage); }
+
+    /* Callout */
+    .callout { background: rgba(255,79,94,0.06); border-left: 3px solid var(--coral); padding: 1rem 1.25rem; border-radius: 0 8px 8px 0; margin: 1.5rem 0; font-size: 0.8125rem; line-height: 1.6; }
+    .callout strong { color: var(--cloud); }
+
+    /* Code block */
+    pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; color: var(--text); overflow-x: auto; margin: 1rem 0; line-height: 1.6; }
+
+    .section-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    @media (max-width: 768px) { .section-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <h1>autoPDF2SQLizer <span>Architecture</span></h1>
+  <p class="subtitle">Full system diagram — what lives where, how data flows, how deployments work.</p>
+
+  <!-- ============================================================ -->
+  <h2>1. High-Level Architecture</h2>
+  <!-- ============================================================ -->
+
+  <div class="diagram">
+    <div class="diagram-title">Production Deployment</div>
+
+    <div class="row">
+      <div class="node external">
+        <div class="node-label">Identity Provider</div>
+        <div class="node-name">Auth0</div>
+        <div class="node-detail">Login, orgs, RBAC tokens<br>JWT with org_id + permissions</div>
+        <div class="node-url">pisteyo.us.auth0.com</div>
+      </div>
+    </div>
+
+    <div class="arrow"><div class="line">↕</div><br>JWT tokens (login redirect + API headers)</div>
+
+    <div class="row">
+      <div class="node azure wide" style="text-align:left;">
+        <div class="node-label">Azure App Service (B1 / Free)</div>
+        <div class="node-name">autopdf2sqlizer.azurewebsites.net</div>
+        <div class="node-detail" style="margin-top:0.75rem;">
+          <strong style="color:var(--cloud);">Single deployment — serves everything:</strong><br><br>
+          <strong style="color:var(--coral);">React Frontend</strong> (static-build/)<br>
+          → Served at <code style="font-family:'IBM Plex Mono';font-size:0.6875rem;color:var(--coral);">/</code> and <code style="font-family:'IBM Plex Mono';font-size:0.6875rem;color:var(--coral);">/assets/*</code><br>
+          → Auth0 SPA SDK, org switcher, role-aware UI<br><br>
+          <strong style="color:var(--blue);">FastAPI Backend</strong> (app.py + auth/ + pipeline)<br>
+          → Serves API at <code style="font-family:'IBM Plex Mono';font-size:0.6875rem;color:var(--blue);">/api/*</code><br>
+          → JWT validation, org-scoped data isolation<br>
+          → gunicorn + uvicorn workers<br><br>
+          <strong style="color:var(--sage);">Persistent Storage</strong> (/home/site/wwwroot/)<br>
+          → data/{org_id}/uploads, cache, ground_truth, results, schemas
+        </div>
+        <div class="node-url">https://autopdf2sqlizer.azurewebsites.net</div>
+      </div>
+    </div>
+
+    <div class="arrow"><div class="line">↕</div><br>API calls from FastAPI backend</div>
+
+    <div class="row">
+      <div class="node external">
+        <div class="node-label">AI Service</div>
+        <div class="node-name">Azure Document Intelligence</div>
+        <div class="node-detail">OCR + layout extraction<br>prebuilt-layout model<br>Results cached per org</div>
+        <div class="node-url">n8n-az-ai-foundry.cognitiveservices.azure.com</div>
+      </div>
+      <div class="node external">
+        <div class="node-label">AI Service</div>
+        <div class="node-name">Anthropic Claude API</div>
+        <div class="node-detail">LLM structuring (process.py)<br>Schema generation from NL<br>Wiggum loop iterations</div>
+        <div class="node-url">api.anthropic.com</div>
+      </div>
+      <div class="node external">
+        <div class="node-label">Customer Database</div>
+        <div class="node-name">SQL Server / PostgreSQL</div>
+        <div class="node-detail">User-configured connection<br>SQL upload via SQLAlchemy<br>Per-org, per-customer</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2>2. CI/CD Pipeline & GitHub</h2>
+  <!-- ============================================================ -->
+
+  <div class="diagram">
+    <div class="diagram-title">Build & Deploy Flow</div>
+
+    <div class="row">
+      <div class="node github" style="text-align:left;">
+        <div class="node-label">GitHub Repository</div>
+        <div class="node-name">gavinpisteyo/autoPDF2SQLizer</div>
+        <div class="node-detail" style="margin-top:0.5rem;">
+          <strong style="color:var(--cloud);">Branches:</strong><br>
+          <code style="font-family:'IBM Plex Mono';font-size:0.6875rem;">main</code> — platform code (triggers deploy)<br>
+          <code style="font-family:'IBM Plex Mono';font-size:0.6875rem;">experiments</code> — Knowledge Base RAG feature<br>
+          <code style="font-family:'IBM Plex Mono';font-size:0.6875rem;">clients/*</code> — per-customer extraction logic
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow"><div class="line">↓</div><br>push to main triggers GitHub Actions</div>
+
+    <div class="row">
+      <div class="node github wide" style="text-align:left;">
+        <div class="node-label">GitHub Actions</div>
+        <div class="node-name">deploy.yml</div>
+        <div class="node-detail">
+          1. Checkout code<br>
+          2. <strong style="color:var(--cloud);">Build React frontend</strong> (npm run build → static-build/)<br>
+          &nbsp;&nbsp;&nbsp;Injects Auth0 env vars at build time<br>
+          3. Install Python deps<br>
+          4. <strong style="color:var(--cloud);">Deploy to Azure App Service</strong> (publish profile)
+        </div>
+      </div>
+      <div class="node github wide" style="text-align:left;">
+        <div class="node-label">GitHub Actions</div>
+        <div class="node-name">wiggum.yml</div>
+        <div class="node-detail">
+          Manual trigger from GitHub UI:<br>
+          → Pick branch (clients/oil-gas-leases)<br>
+          → Set cycles, model (Sonnet/Opus)<br>
+          → Runs wiggum_cloud.py<br>
+          → Pushes improved code back to branch
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow"><div class="line">↓</div><br>deploy.yml pushes build to Azure</div>
+
+    <div class="row">
+      <div class="node azure">
+        <div class="node-label">Azure App Service</div>
+        <div class="node-name">autopdf2sqlizer</div>
+        <div class="node-detail">Receives deployed bundle<br>Restarts with gunicorn</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2>3. Data Flow — PDF to SQL</h2>
+  <!-- ============================================================ -->
+
+  <div class="diagram">
+    <div class="diagram-title">End-to-End Pipeline</div>
+    <pre style="text-align:center; border:none; background:transparent; color:var(--text);">
+  USER uploads PDF                      USER describes fields
+       │                                       │
+       ▼                                       ▼
+  ┌─────────────┐                    ┌──────────────────┐
+  │  /api/extract │                    │ /api/generate-   │
+  │             │                    │    schema        │
+  └──────┬──────┘                    └────────┬─────────┘
+         │                                    │
+         ▼                                    ▼
+  ┌─────────────────┐               ┌──────────────────┐
+  │ Azure Doc Intel  │               │  Claude API       │
+  │ (OCR + layout)   │               │  (NL → JSON       │
+  │                  │               │   Schema)         │
+  └────────┬────────┘               └────────┬─────────┘
+           │ raw JSON (cached)               │ schema
+           ▼                                 │
+  ┌─────────────────────────────────────────────────┐
+  │                  process.py                      │
+  │  pre_process() → llm_extract() → post_process() │
+  │  ★ THE WIGGUM LOOP MODIFIES THIS FILE ★         │
+  └────────────────────┬────────────────────────────┘
+                       │ extracted JSON
+                       ▼
+              ┌────────────────┐
+              │ USER reviews   │
+              │ & corrects     │
+              └───┬────┬───┬───┘
+                  │    │   │
+         ┌────────┘    │   └─────────┐
+         ▼             ▼             ▼
+  ┌────────────┐ ┌──────────┐ ┌──────────────┐
+  │ Save as    │ │ Convert  │ │ Index to KB  │
+  │ Ground     │ │ to SQL   │ │ (experiments │
+  │ Truth      │ │          │ │  branch)     │
+  └──────┬─────┘ └─────┬────┘ └──────────────┘
+         │             │
+         ▼             ▼
+  ┌────────────┐ ┌──────────────┐
+  │ Wiggum     │ │ Upload to    │
+  │ loop uses  │ │ customer DB  │
+  │ for eval   │ │ (SQL Server) │
+  └────────────┘ └──────────────┘
+    </pre>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2>4. Wiggum Loop — Autonomous Optimization</h2>
+  <!-- ============================================================ -->
+
+  <div class="diagram">
+    <div class="diagram-title">Two Modes</div>
+    <div class="section-grid">
+      <div class="node local full" style="text-align:left;max-width:100%;">
+        <div class="node-label">Local Mode (wiggum.sh)</div>
+        <div class="node-name">Developer's Machine</div>
+        <div class="node-detail" style="margin-top:0.5rem;">
+          Uses Claude Code CLI (claude -p)<br>
+          Each invocation = fresh agent, zero memory<br>
+          Git branch is the only state<br><br>
+          <code style="font-family:'IBM Plex Mono';font-size:0.6875rem;">./wiggum.sh --instance oil-gas-leases</code>
+        </div>
+      </div>
+      <div class="node github full" style="text-align:left;max-width:100%;">
+        <div class="node-label">Cloud Mode (wiggum_cloud.py)</div>
+        <div class="node-name">GitHub Actions / Any Python Runtime</div>
+        <div class="node-detail" style="margin-top:0.5rem;">
+          Uses Claude API calls directly (no CLI)<br>
+          Each API call = fresh instance, no context<br>
+          Pushes improved code back to branch<br><br>
+          <code style="font-family:'IBM Plex Mono';font-size:0.6875rem;">uv run wiggum_cloud.py --cycles 10</code>
+        </div>
+      </div>
+    </div>
+    <pre style="text-align:center; border:none; background:transparent; color:var(--text); margin-top:1rem;">
+         ┌─────────────────────────────────────────────┐
+         │           THE WIGGUM LOOP                   │
+         │                                             │
+         │  1. Read current process.py + eval results  │
+         │  2. Call Claude: "fix the worst fields"     │
+         │  3. Apply changes to process.py             │
+         │  4. Run evaluate.py                         │
+         │  5. Accuracy up? → git commit (KEEP)        │
+         │     Same or down? → git reset (DISCARD)     │
+         │  6. Spawn fresh agent → go to 1             │
+         │                                             │
+         │  Code accumulates intelligence.             │
+         │  Agents are stateless.                      │
+         └─────────────────────────────────────────────┘
+    </pre>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2>5. Multi-Tenant Data Isolation</h2>
+  <!-- ============================================================ -->
+
+  <div class="diagram">
+    <div class="diagram-title">Org-Scoped Storage</div>
+    <pre style="border:none; background:transparent; color:var(--text);">
+  AUTH_ENABLED=true
+  ─────────────────────────────────────────────────────
+
+  schemas/                     ← GLOBAL (read-only, built-in)
+    invoice.json
+    contract.json
+    medical_form.json
+    financial_statement.json
+
+  data/
+    org_acme_corp/             ← ORG A (isolated)
+      schemas/custom/
+      ground_truth/invoice/
+      uploads/
+      cache/invoice/
+      results/
+
+    org_fintech_co/            ← ORG B (isolated)
+      schemas/custom/
+      ground_truth/check_deposit/
+      uploads/
+      cache/check_deposit/
+      results/
+
+  AUTH_ENABLED=false (dev mode)
+  ─────────────────────────────────────────────────────
+
+  schemas/                     ← flat, global (original layout)
+  schemas/custom/
+  ground_truth/
+  uploads/
+  cache/
+  results/
+    </pre>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2>6. Auth Flow</h2>
+  <!-- ============================================================ -->
+
+  <div class="diagram">
+    <div class="diagram-title">Authentication & Authorization</div>
+    <pre style="border:none; background:transparent; color:var(--text);">
+  BROWSER                     AUTH0                      FASTAPI
+  ───────                     ─────                      ───────
+     │                           │                          │
+     │── Click "Sign In" ──────→ │                          │
+     │                           │                          │
+     │← Auth0 Universal Login ──│                          │
+     │   (user enters creds)     │                          │
+     │                           │                          │
+     │── Auth code ────────────→ │                          │
+     │                           │                          │
+     │← Access Token (JWT) ─────│                          │
+     │   contains:               │                          │
+     │   - sub (user ID)         │                          │
+     │   - org_id                │                          │
+     │   - permissions[]         │                          │
+     │                           │                          │
+     │── GET /api/schemas ────────────────────────────────→ │
+     │   Authorization: Bearer {token}                      │
+     │   X-Org-Id: org_acme_corp                           │
+     │                           │                          │
+     │                           │     get_current_user()   │
+     │                           │     → validate JWT       │
+     │                           │     → check JWKS         │
+     │                           │                          │
+     │                           │     get_org_context()    │
+     │                           │     → extract org_id     │
+     │                           │     → resolve role       │
+     │                           │                          │
+     │                           │     resolve_org_paths()  │
+     │                           │     → data/org_acme_corp/│
+     │                           │                          │
+     │                           │     require_at_least()   │
+     │                           │     → check role ≥ min   │
+     │                           │                          │
+     │← 200 OK (org-scoped data)──────────────────────────│
+    </pre>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2>7. Component Inventory</h2>
+  <!-- ============================================================ -->
+
+  <table>
+    <tr>
+      <th>Component</th>
+      <th>Where It Lives</th>
+      <th>What It Does</th>
+    </tr>
+    <tr>
+      <td>React Frontend</td>
+      <td><span class="tag tag-azure">App Service</span> static-build/</td>
+      <td>UI — upload PDFs, review extractions, manage schemas, configure DB. Auth0 SPA SDK handles login.</td>
+    </tr>
+    <tr>
+      <td>FastAPI Backend</td>
+      <td><span class="tag tag-azure">App Service</span> app.py</td>
+      <td>15 API endpoints. JWT validation, org-scoped data, orchestrates Doc Intel + Claude.</td>
+    </tr>
+    <tr>
+      <td>Auth Module</td>
+      <td><span class="tag tag-azure">App Service</span> auth/</td>
+      <td>Decoupled auth — JWT validation, RBAC, org-scoped path resolution. 4 files, ~250 lines.</td>
+    </tr>
+    <tr>
+      <td>Extraction Pipeline</td>
+      <td><span class="tag tag-azure">App Service</span> process.py</td>
+      <td>The file the Wiggum loop modifies. Pre-process → LLM extract → post-process.</td>
+    </tr>
+    <tr>
+      <td>SQL Generator</td>
+      <td><span class="tag tag-azure">App Service</span> sql_gen.py</td>
+      <td>JSON → SQL INSERT statements. Supports SQL Server, PostgreSQL, MySQL.</td>
+    </tr>
+    <tr>
+      <td>Doc Intel Wrapper</td>
+      <td><span class="tag tag-azure">App Service</span> doc_intel.py</td>
+      <td>Azure Document Intelligence SDK wrapper. Caches results per org.</td>
+    </tr>
+    <tr>
+      <td>Evaluation Harness</td>
+      <td><span class="tag tag-azure">App Service</span> evaluate.py</td>
+      <td>Fixed metric. Compares extraction output to ground truth. Field-level accuracy.</td>
+    </tr>
+    <tr>
+      <td>Wiggum Loop (local)</td>
+      <td><span class="tag tag-local">Developer Machine</span></td>
+      <td>wiggum.sh — spawns fresh Claude Code agents in a bash loop.</td>
+    </tr>
+    <tr>
+      <td>Wiggum Loop (cloud)</td>
+      <td><span class="tag tag-github">GitHub Actions</span></td>
+      <td>wiggum_cloud.py — pure Python, calls Claude API directly. No CLI needed.</td>
+    </tr>
+    <tr>
+      <td>Instance Manager</td>
+      <td><span class="tag tag-local">Developer Machine</span></td>
+      <td>instance.sh — create/switch/sync client branches for multi-tenant extraction.</td>
+    </tr>
+    <tr>
+      <td>CI/CD Deploy</td>
+      <td><span class="tag tag-github">GitHub Actions</span></td>
+      <td>deploy.yml — builds React, deploys to App Service on push to main.</td>
+    </tr>
+    <tr>
+      <td>Auth0</td>
+      <td><span class="tag tag-ext">External SaaS</span></td>
+      <td>Organizations, RBAC, login, JWT issuance. 4 roles: admin, dev, business, viewer.</td>
+    </tr>
+    <tr>
+      <td>Azure Doc Intel</td>
+      <td><span class="tag tag-ext">External SaaS</span></td>
+      <td>OCR + layout analysis for PDFs. prebuilt-layout model.</td>
+    </tr>
+    <tr>
+      <td>Claude API</td>
+      <td><span class="tag tag-ext">External SaaS</span></td>
+      <td>LLM for structuring raw extraction into schemas. Also used by Wiggum loop.</td>
+    </tr>
+  </table>
+
+  <!-- ============================================================ -->
+  <h2>8. Do We Need More Infrastructure?</h2>
+  <!-- ============================================================ -->
+
+  <div class="callout">
+    <strong>Current setup: everything runs on ONE Azure App Service.</strong><br><br>
+    The React build and FastAPI backend are deployed together. FastAPI serves the static files AND handles API requests.
+    This is fine for the current scale. You do NOT need a separate Container App or Function App yet.<br><br>
+    <strong>When to split:</strong>
+  </div>
+
+  <table>
+    <tr><th>Trigger</th><th>Action</th></tr>
+    <tr>
+      <td>Frontend needs a CDN / faster global delivery</td>
+      <td>Move React build to <strong>Azure Static Web Apps</strong> (free, CDN-backed). Point it at the App Service API.</td>
+    </tr>
+    <tr>
+      <td>Backend needs auto-scaling for heavy extraction load</td>
+      <td>Move FastAPI to <strong>Azure Container App</strong> (scales to zero, auto-scales up).</td>
+    </tr>
+    <tr>
+      <td>Long-running extractions timeout on App Service</td>
+      <td>Move extraction to <strong>Azure Container Instance</strong> or a background queue (Azure Service Bus).</td>
+    </tr>
+    <tr>
+      <td>File storage fills App Service disk</td>
+      <td>Swap local filesystem for <strong>Azure Blob Storage</strong> (per-org containers).</td>
+    </tr>
+    <tr>
+      <td>Multiple teams working on frontend vs backend</td>
+      <td>Split into two repos. Frontend deploys to Static Web Apps, backend stays on App Service.</td>
+    </tr>
+  </table>
+
+  <div class="callout">
+    <strong>Bottom line:</strong> You're correctly deployed today. The architecture is ready to split but doesn't need to yet.
+    When you hit one of the triggers above, the split is a config change — no code rewrite.
+  </div>
+
+</div>
+</body>
+</html>
