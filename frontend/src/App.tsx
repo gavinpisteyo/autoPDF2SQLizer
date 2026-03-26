@@ -1,22 +1,34 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAuthContext, AUTH_ENABLED } from './lib/auth';
+import { createApiClient, type ApiClient } from './lib/api';
+import TopBar from './components/TopBar';
+import LoginScreen from './components/LoginScreen';
 import ExtractTab from './pages/ExtractTab';
 import GroundTruthTab from './pages/GroundTruthTab';
 import EvaluateTab from './pages/EvaluateTab';
 import DatabaseTab from './pages/DatabaseTab';
 import SchemasTab from './pages/SchemasTab';
-import * as api from './lib/api';
 
-const TABS = [
-  { id: 'extract', label: 'Extract' },
-  { id: 'ground-truth', label: 'Ground Truth' },
-  { id: 'evaluate', label: 'Evaluate' },
-  { id: 'database', label: 'Database' },
-  { id: 'schemas', label: 'Schemas' },
-] as const;
+type TabId = 'extract' | 'ground-truth' | 'evaluate' | 'database' | 'schemas';
 
-type TabId = (typeof TABS)[number]['id'];
+interface TabDef {
+  id: TabId;
+  label: string;
+  minRole: 'org_admin' | 'developer' | 'business_user' | 'viewer';
+}
+
+const TABS: TabDef[] = [
+  { id: 'extract', label: 'Extract', minRole: 'business_user' },
+  { id: 'ground-truth', label: 'Ground Truth', minRole: 'developer' },
+  { id: 'evaluate', label: 'Evaluate', minRole: 'developer' },
+  { id: 'database', label: 'Database', minRole: 'developer' },
+  { id: 'schemas', label: 'Schemas', minRole: 'viewer' },
+];
 
 export default function App() {
+  const auth = useAuthContext();
+  const { isAuthenticated, isLoading, getToken, orgId, roleAtLeast } = auth;
+
   const [activeTab, setActiveTab] = useState<TabId>('extract');
   const [schemas, setSchemas] = useState<Record<string, { builtin: boolean }>>({});
   const [gtRefreshKey, setGtRefreshKey] = useState(0);
@@ -28,32 +40,56 @@ export default function App() {
     includeDdl: false,
   });
 
+  // Create authenticated API client
+  const api: ApiClient = useMemo(
+    () => createApiClient(getToken, orgId),
+    [getToken, orgId],
+  );
+
   const loadSchemas = useCallback(async () => {
     try {
       const data = await api.listSchemas();
       setSchemas(data);
     } catch {}
-  }, []);
+  }, [api]);
 
-  useEffect(() => { loadSchemas(); }, [loadSchemas]);
+  useEffect(() => {
+    if (isAuthenticated) loadSchemas();
+  }, [isAuthenticated, loadSchemas]);
+
+  // Filter tabs by role
+  const visibleTabs = TABS.filter(tab => roleAtLeast(tab.minRole));
+
+  // Ensure active tab is visible
+  useEffect(() => {
+    if (visibleTabs.length && !visibleTabs.find(t => t.id === activeTab)) {
+      setActiveTab(visibleTabs[0].id);
+    }
+  }, [visibleTabs, activeTab]);
+
+  // Loading state
+  if (AUTH_ENABLED && isLoading) {
+    return (
+      <div className="min-h-[100dvh] flex items-center justify-center">
+        <p className="text-mid text-sm">Loading...</p>
+      </div>
+    );
+  }
+
+  // Login gate
+  if (AUTH_ENABLED && !isAuthenticated) {
+    return <LoginScreen />;
+  }
 
   const schemaKeys = Object.keys(schemas);
 
   return (
     <div className="max-w-[1000px] mx-auto px-8 pt-12 pb-16">
-      {/* Header */}
-      <div className="mb-12">
-        <h1 className="font-heading text-xl font-semibold tracking-tight text-cloud">
-          autoPDF2SQLizer <span className="font-normal text-coral">by Pisteyo</span>
-        </h1>
-        <p className="text-[0.8125rem] text-mid mt-1 font-light tracking-wide">
-          Extract structured data from documents. Build accuracy. Push to your database.
-        </p>
-      </div>
+      <TopBar />
 
       {/* Navigation */}
       <nav className="flex border-b border-border mb-10">
-        {TABS.map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
@@ -75,18 +111,19 @@ export default function App() {
         <ExtractTab
           schemas={schemaKeys}
           dbConfig={dbConfig}
+          api={api}
           onGroundTruthSaved={() => setGtRefreshKey(k => k + 1)}
         />
       )}
       {activeTab === 'ground-truth' && (
-        <GroundTruthTab schemas={schemaKeys} refreshKey={gtRefreshKey} />
+        <GroundTruthTab schemas={schemaKeys} refreshKey={gtRefreshKey} api={api} />
       )}
-      {activeTab === 'evaluate' && <EvaluateTab />}
+      {activeTab === 'evaluate' && <EvaluateTab api={api} />}
       {activeTab === 'database' && (
-        <DatabaseTab config={dbConfig} onChange={setDbConfig} />
+        <DatabaseTab config={dbConfig} onChange={setDbConfig} api={api} />
       )}
       {activeTab === 'schemas' && (
-        <SchemasTab schemas={schemas} onSchemasChanged={loadSchemas} />
+        <SchemasTab schemas={schemas} onSchemasChanged={loadSchemas} api={api} />
       )}
     </div>
   );

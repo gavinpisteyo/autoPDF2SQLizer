@@ -1,8 +1,12 @@
 import { useState } from 'react';
 import StatusMessage from '../components/StatusMessage';
-import * as api from '../lib/api';
+import type { ApiClient } from '../lib/api';
 
-export default function EvaluateTab() {
+interface EvaluateTabProps {
+  api: ApiClient;
+}
+
+export default function EvaluateTab({ api }: EvaluateTabProps) {
   const [status, setStatus] = useState<{ msg: string; type: 'success' | 'error' | 'loading' | null }>({ msg: '', type: null });
   const [result, setResult] = useState('');
   const [running, setRunning] = useState(false);

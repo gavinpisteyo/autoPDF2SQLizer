@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import StatusMessage from '../components/StatusMessage';
-import * as api from '../lib/api';
+import type { ApiClient } from '../lib/api';
 
 interface SchemasTabProps {
   schemas: Record<string, { builtin: boolean }>;
   onSchemasChanged: () => void;
+  api: ApiClient;
 }
 
-export default function SchemasTab({ schemas, onSchemasChanged }: SchemasTabProps) {
+export default function SchemasTab({ schemas, onSchemasChanged, api }: SchemasTabProps) {
   const [genKey, setGenKey] = useState('');
   const [genDesc, setGenDesc] = useState('');
   const [genStatus, setGenStatus] = useState<{ msg: string; type: 'success' | 'error' | 'loading' | null }>({ msg: '', type: null });

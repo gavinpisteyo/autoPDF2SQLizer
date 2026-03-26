@@ -3,7 +3,7 @@ import DropZone from '../components/DropZone';
 import FileChip from '../components/FileChip';
 import StatusMessage from '../components/StatusMessage';
 import DocResultCard from '../components/DocResultCard';
-import * as api from '../lib/api';
+import type { ApiClient } from '../lib/api';
 
 interface ExtractResult {
   filename: string;
@@ -16,10 +16,11 @@ interface ExtractResult {
 interface ExtractTabProps {
   schemas: string[];
   dbConfig: { dialect: string; tableName: string; schemaName: string; connStr: string; includeDdl: boolean };
+  api: ApiClient;
   onGroundTruthSaved?: () => void;
 }
 
-export default function ExtractTab({ schemas, dbConfig, onGroundTruthSaved }: ExtractTabProps) {
+export default function ExtractTab({ schemas, dbConfig, api, onGroundTruthSaved }: ExtractTabProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [docType, setDocType] = useState(schemas[0] || '');
   const [customSchema, setCustomSchema] = useState('');
@@ -131,6 +132,7 @@ export default function ExtractTab({ schemas, dbConfig, onGroundTruthSaved }: Ex
               docType={r.docType}
               error={r.error}
               dbConfig={dbConfig}
+              api={api}
               onGroundTruthSaved={onGroundTruthSaved}
             />
           ))}

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import * as api from '../lib/api';
+import type { ApiClient } from '../lib/api';
 
 interface DocResultCardProps {
   filename: string;
@@ -8,11 +8,12 @@ interface DocResultCardProps {
   docType: string;
   error?: string;
   dbConfig: { dialect: string; tableName: string; schemaName: string; connStr: string; includeDdl: boolean };
+  api: ApiClient;
   onGroundTruthSaved?: () => void;
 }
 
 export default function DocResultCard({
-  filename, extracted, sourceFile, docType, error, dbConfig, onGroundTruthSaved,
+  filename, extracted, sourceFile, docType, error, dbConfig, api, onGroundTruthSaved,
 }: DocResultCardProps) {
   const [open, setOpen] = useState(!!extracted || !!error);
   const [json, setJson] = useState(extracted ? JSON.stringify(extracted, null, 2) : error || '');

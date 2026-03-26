@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import StatusMessage from '../components/StatusMessage';
-import * as api from '../lib/api';
+import type { ApiClient } from '../lib/api';
 
 interface DatabaseTabProps {
   config: {
@@ -11,9 +11,10 @@ interface DatabaseTabProps {
     includeDdl: boolean;
   };
   onChange: (config: DatabaseTabProps['config']) => void;
+  api: ApiClient;
 }
 
-export default function DatabaseTab({ config, onChange }: DatabaseTabProps) {
+export default function DatabaseTab({ config, onChange, api }: DatabaseTabProps) {
   const [testStatus, setTestStatus] = useState<{ msg: string; type: 'success' | 'error' | 'loading' | null }>({ msg: '', type: null });
 
   const update = (field: string, value: string | boolean) => {

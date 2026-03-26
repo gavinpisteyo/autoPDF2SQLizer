@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import DropZone from '../components/DropZone';
 import StatusMessage from '../components/StatusMessage';
-import * as api from '../lib/api';
+import type { ApiClient } from '../lib/api';
 
 interface GtDoc {
   doc_type: string;
@@ -13,13 +13,14 @@ interface GtDoc {
 interface GroundTruthTabProps {
   schemas: string[];
   refreshKey: number;
+  api: ApiClient;
 }
 
 function stem(filename: string) {
   return filename.replace(/\.[^.]+$/, '');
 }
 
-export default function GroundTruthTab({ schemas, refreshKey }: GroundTruthTabProps) {
+export default function GroundTruthTab({ schemas, refreshKey, api }: GroundTruthTabProps) {
   const [docType, setDocType] = useState(schemas[0] || '');
   const [files, setFiles] = useState<File[]>([]);
   const [status, setStatus] = useState<{ msg: string; type: 'success' | 'error' | 'loading' | null }>({ msg: '', type: null });
