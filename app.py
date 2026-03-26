@@ -46,12 +46,23 @@ for d in [CUSTOM_SCHEMAS_DIR, GROUND_TRUTH_DIR, UPLOADS_DIR, RESULTS_DIR]:
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="autoPDF2SQLizer", version="0.1.0")
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
+# Serve React build if available, fall back to legacy static/
+STATIC_BUILD_DIR = BASE_DIR / "static-build"
+LEGACY_STATIC_DIR = BASE_DIR / "static"
 
-@app.get("/")
-async def index():
-    return FileResponse(str(BASE_DIR / "static" / "index.html"))
+if STATIC_BUILD_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(STATIC_BUILD_DIR / "assets")), name="assets")
+
+    @app.get("/")
+    async def index():
+        return FileResponse(str(STATIC_BUILD_DIR / "index.html"))
+else:
+    app.mount("/static", StaticFiles(directory=str(LEGACY_STATIC_DIR)), name="static")
+
+    @app.get("/")
+    async def index():
+        return FileResponse(str(LEGACY_STATIC_DIR / "index.html"))
 
 
 # ---------------------------------------------------------------------------

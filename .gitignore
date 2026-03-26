@@ -8,3 +8,6 @@ results/
 run.log
 results.tsv
 logs/
+knowledge_bases/
+static-build/
+frontend/node_modules/
