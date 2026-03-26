@@ -106,7 +106,9 @@ async def get_org_context(
 ) -> OrgContext:
     """
     Resolve the active organization and the user's role within it.
-    Org comes from the token's org_id claim, or the X-Org-Id header.
+    Checks Auth0 token permissions first, then falls back to local
+    metadata DB for role lookup. This lets the app work even when
+    Auth0 Organizations aren't fully configured.
     """
     user = await get_current_user(authorization)
     config = get_auth_config()
@@ -115,10 +117,23 @@ async def get_org_context(
         return OrgContext(org_id="default", user=user, role=OrgRole.ORG_ADMIN)
 
     org_id = user.org_id or x_org_id
-    if not org_id:
-        raise HTTPException(400, "No organization context. Include org_id in token or X-Org-Id header.")
 
+    # Try Auth0 token permissions first
     role = resolve_role(user.permissions)
+
+    # Fallback: check local metadata DB for role
+    if role == OrgRole.VIEWER and org_id:
+        from metadata import get_user_org_role
+        local_role = get_user_org_role(org_id, user.sub)
+        if local_role:
+            try:
+                role = OrgRole(local_role)
+            except ValueError:
+                pass
+
+    # If user still has no org, that's OK — the onboarding flow handles it
+    if not org_id:
+        org_id = ""
 
     return OrgContext(org_id=org_id, user=user, role=role)
 

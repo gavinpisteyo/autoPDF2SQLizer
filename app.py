@@ -130,6 +130,26 @@ from auth import get_current_user, get_org_context
 from auth.models import AuthUser
 
 
+@app.post("/api/orgs")
+async def create_org(
+    name: str = Form(...),
+    authorization: str = Header(default=""),
+):
+    """Create a new organization. The creator becomes admin."""
+    user = await get_current_user(authorization)
+    org = db.create_org(name, user.sub, user.email, user.name)
+    return org.to_dict()
+
+
+@app.get("/api/me/orgs")
+async def list_my_orgs(
+    authorization: str = Header(default=""),
+):
+    """List all orgs the current user belongs to."""
+    user = await get_current_user(authorization)
+    return db.list_user_orgs(user.sub)
+
+
 @app.post("/api/orgs/join")
 async def request_join_org(
     org_id: str = Form(...),
@@ -162,6 +182,10 @@ async def resolve_join_request(
     result = db.resolve_join_request(request_id, ctx.user.sub, approve)
     if not result:
         raise HTTPException(404, "Request not found")
+    # If approved, add them to the org as a business_user
+    if approve and result.status == "approved":
+        db.add_org_member(ctx.org_id, result.user_sub, "business_user",
+                          result.user_email, result.user_name)
     return result.to_dict()
 
 

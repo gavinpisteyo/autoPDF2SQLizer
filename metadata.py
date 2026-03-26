@@ -47,6 +47,23 @@ def init_db():
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS org_members (
+            org_id TEXT NOT NULL,
+            user_sub TEXT NOT NULL,
+            user_email TEXT DEFAULT '',
+            user_name TEXT DEFAULT '',
+            role TEXT DEFAULT 'viewer',
+            joined_at TEXT NOT NULL,
+            PRIMARY KEY (org_id, user_sub)
+        );
+
+        CREATE TABLE IF NOT EXISTS orgs (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS join_requests (
             id TEXT PRIMARY KEY,
             org_id TEXT NOT NULL,
@@ -290,3 +307,85 @@ def resolve_join_request(request_id: str, resolved_by: str, approve: bool) -> Jo
     if not row:
         return None
     return JoinRequest(**dict(row))
+
+
+# ---------------------------------------------------------------------------
+# Organizations (app-managed, independent of Auth0 orgs)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Org:
+    id: str
+    name: str
+    created_by: str
+    created_at: str
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def create_org(name: str, creator_sub: str, creator_email: str = "", creator_name: str = "") -> Org:
+    """Create an org and make the creator an admin."""
+    conn = _get_conn()
+    org_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+
+    conn.execute(
+        "INSERT INTO orgs (id, name, created_by, created_at) VALUES (?, ?, ?, ?)",
+        (org_id, name, creator_sub, now),
+    )
+    conn.execute(
+        "INSERT INTO org_members (org_id, user_sub, user_email, user_name, role, joined_at) VALUES (?, ?, ?, ?, 'org_admin', ?)",
+        (org_id, creator_sub, creator_email, creator_name, now),
+    )
+    conn.commit()
+    conn.close()
+
+    return Org(id=org_id, name=name, created_by=creator_sub, created_at=now)
+
+
+def list_user_orgs(user_sub: str) -> list[dict]:
+    """List all orgs a user belongs to, with their role in each."""
+    conn = _get_conn()
+    rows = conn.execute(
+        """SELECT o.id, o.name, o.created_at, om.role
+           FROM orgs o
+           JOIN org_members om ON o.id = om.org_id
+           WHERE om.user_sub = ?
+           ORDER BY o.created_at""",
+        (user_sub,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_org(org_id: str) -> Org | None:
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM orgs WHERE id = ?", (org_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return Org(**dict(row))
+
+
+def get_user_org_role(org_id: str, user_sub: str) -> str | None:
+    """Get a user's role in an org from the local DB. Returns None if not a member."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT role FROM org_members WHERE org_id = ? AND user_sub = ?",
+        (org_id, user_sub),
+    ).fetchone()
+    conn.close()
+    return row["role"] if row else None
+
+
+def add_org_member(org_id: str, user_sub: str, role: str = "viewer",
+                   user_email: str = "", user_name: str = ""):
+    conn = _get_conn()
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT OR REPLACE INTO org_members (org_id, user_sub, user_email, user_name, role, joined_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (org_id, user_sub, user_email, user_name, role, now),
+    )
+    conn.commit()
+    conn.close()

@@ -122,6 +122,14 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
   }
 
   // -- Organizations --
+  async function createOrg(name: string) {
+    const fd = new FormData();
+    fd.append('name', name);
+    return post('/orgs', fd);
+  }
+
+  const listMyOrgs = () => get('/me/orgs');
+
   async function requestJoinOrg(targetOrgId: string) {
     const fd = new FormData();
     fd.append('org_id', targetOrgId);
@@ -166,7 +174,7 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
     runEvaluation,
     generateSql, executeSql, testConnection,
     generateSchema,
-    requestJoinOrg, listJoinRequests, resolveJoinRequest,
+    createOrg, listMyOrgs, requestJoinOrg, listJoinRequests, resolveJoinRequest,
     listProjects, createProject, getProject, addProjectMember, removeProjectMember,
   };
 }

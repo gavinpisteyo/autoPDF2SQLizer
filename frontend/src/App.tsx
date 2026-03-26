@@ -3,6 +3,7 @@ import { useAuthContext, AUTH_ENABLED } from './lib/auth';
 import { createApiClient, type ApiClient } from './lib/api';
 import TopBar from './components/TopBar';
 import LoginScreen from './components/LoginScreen';
+import OnboardingScreen from './components/OnboardingScreen';
 import ExtractTab from './pages/ExtractTab';
 import GroundTruthTab from './pages/GroundTruthTab';
 import EvaluateTab from './pages/EvaluateTab';
@@ -29,11 +30,13 @@ const TABS: TabDef[] = [
 
 export default function App() {
   const auth = useAuthContext();
-  const { isAuthenticated, isLoading, getToken, orgId, projectId, roleAtLeast } = auth;
+  const { isAuthenticated, isLoading, getToken, orgId, projectId, roleAtLeast, user } = auth;
 
   const [activeTab, setActiveTab] = useState<TabId>('extract');
   const [schemas, setSchemas] = useState<Record<string, { builtin: boolean }>>({});
   const [gtRefreshKey, setGtRefreshKey] = useState(0);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
   const [dbConfig, setDbConfig] = useState({
     dialect: 'mssql',
     tableName: '',
@@ -42,11 +45,25 @@ export default function App() {
     includeDdl: false,
   });
 
-  // Create authenticated API client
+  // Create authenticated API client (orgId may be empty during onboarding)
   const api: ApiClient = useMemo(
     () => createApiClient(getToken, orgId, projectId),
     [getToken, orgId, projectId],
   );
+
+  // Check if user has any orgs (onboarding check)
+  useEffect(() => {
+    if (!isAuthenticated || !AUTH_ENABLED) { setOnboardingChecked(true); return; }
+    api.listMyOrgs().then((orgs: Array<{ id: string }>) => {
+      if (orgs.length === 0) {
+        setNeedsOnboarding(true);
+      } else if (!orgId) {
+        // Auto-select first org
+        auth.switchOrg(orgs[0].id);
+      }
+      setOnboardingChecked(true);
+    }).catch(() => { setOnboardingChecked(true); });
+  }, [isAuthenticated]);
 
   const loadSchemas = useCallback(async () => {
     try {
@@ -56,8 +73,8 @@ export default function App() {
   }, [api]);
 
   useEffect(() => {
-    if (isAuthenticated) loadSchemas();
-  }, [isAuthenticated, loadSchemas]);
+    if (isAuthenticated && orgId) loadSchemas();
+  }, [isAuthenticated, orgId, loadSchemas]);
 
   // Filter tabs by role
   const visibleTabs = TABS.filter(tab => roleAtLeast(tab.minRole));
@@ -70,7 +87,7 @@ export default function App() {
   }, [visibleTabs, activeTab]);
 
   // Loading state
-  if (AUTH_ENABLED && isLoading) {
+  if ((AUTH_ENABLED && isLoading) || !onboardingChecked) {
     return (
       <div className="min-h-[100dvh] flex items-center justify-center">
         <p className="text-mid text-sm">Loading...</p>
@@ -81,6 +98,21 @@ export default function App() {
   // Login gate
   if (AUTH_ENABLED && !isAuthenticated) {
     return <LoginScreen />;
+  }
+
+  // Onboarding — user has no orgs yet
+  if (AUTH_ENABLED && needsOnboarding) {
+    return (
+      <OnboardingScreen
+        api={api}
+        userName={user?.name || ''}
+        onOrgCreated={(newOrgId) => {
+          setNeedsOnboarding(false);
+          auth.switchOrg(newOrgId);
+        }}
+        onJoinRequested={() => {}}
+      />
+    );
   }
 
   const schemaKeys = Object.keys(schemas);

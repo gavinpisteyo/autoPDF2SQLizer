@@ -141,11 +141,11 @@ function Auth0InnerProvider({ children }: { children: ReactNode }) {
 
   const switchOrg = useCallback((newOrgId: string) => {
     localStorage.setItem('active_org_id', newOrgId);
+    localStorage.removeItem('active_project_id');
     setOrgId(newOrgId);
-    loginWithRedirect({
-      authorizationParams: { organization: newOrgId },
-    });
-  }, [loginWithRedirect]);
+    setProjectIdState('');
+    // No Auth0 redirect — org context is managed locally via X-Org-Id header
+  }, []);
 
   const login = useCallback(() => {
     loginWithRedirect();
