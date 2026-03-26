@@ -22,6 +22,7 @@ ROLE_HIERARCHY = [OrgRole.ORG_ADMIN, OrgRole.DEVELOPER, OrgRole.BUSINESS_USER, O
 PERMISSION_ROLE_MAP: dict[str, OrgRole] = {
     "org:admin": OrgRole.ORG_ADMIN,
     "evaluate:run": OrgRole.DEVELOPER,
+    "ground_truth:write": OrgRole.BUSINESS_USER,
     "extract:run": OrgRole.BUSINESS_USER,
     "schemas:read": OrgRole.VIEWER,
 }

@@ -219,7 +219,7 @@ async def upload_ground_truth(
     pdf: UploadFile = File(...),
     truth_json: UploadFile = File(...),
     doc_type: str = Form(...),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.DEVELOPER)),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
     paths: OrgPaths = Depends(resolve_org_paths),
 ):
     """Upload a ground truth document (PDF + known-correct JSON)."""
@@ -252,7 +252,7 @@ async def upload_ground_truth(
 
 @app.post("/api/cache")
 async def cache_ground_truth(
-    ctx: OrgContext = Depends(require_at_least(OrgRole.DEVELOPER)),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
     paths: OrgPaths = Depends(resolve_org_paths),
 ):
     """Run Azure Doc Intel on all uncached ground truth PDFs."""
@@ -345,7 +345,7 @@ async def save_as_ground_truth(
     source_file: str = Form(...),
     doc_type: str = Form(...),
     corrected_json: str = Form(...),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.DEVELOPER)),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
     paths: OrgPaths = Depends(resolve_org_paths),
 ):
     """Save a corrected extraction result as ground truth."""

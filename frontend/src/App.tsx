@@ -19,7 +19,7 @@ interface TabDef {
 
 const TABS: TabDef[] = [
   { id: 'extract', label: 'Extract', minRole: 'business_user' },
-  { id: 'ground-truth', label: 'Ground Truth', minRole: 'developer' },
+  { id: 'ground-truth', label: 'Ground Truth', minRole: 'business_user' },
   { id: 'evaluate', label: 'Evaluate', minRole: 'developer' },
   { id: 'database', label: 'Database', minRole: 'developer' },
   { id: 'schemas', label: 'Schemas', minRole: 'viewer' },
