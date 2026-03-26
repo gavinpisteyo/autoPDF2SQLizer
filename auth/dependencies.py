@@ -101,18 +101,14 @@ async def get_current_user(authorization: str = Header(default="")) -> AuthUser:
 
 
 async def get_org_context(
-    user: AuthUser = None,
+    authorization: str = Header(default=""),
     x_org_id: str = Header(default=""),
 ) -> OrgContext:
     """
     Resolve the active organization and the user's role within it.
     Org comes from the token's org_id claim, or the X-Org-Id header.
     """
-    # In practice, `user` is injected by FastAPI's Depends system.
-    # This signature is for documentation; actual wiring is in the route.
-    if user is None:
-        user = await get_current_user()
-
+    user = await get_current_user(authorization)
     config = get_auth_config()
 
     if not config.auth_enabled:
@@ -128,14 +124,15 @@ async def get_org_context(
 
 
 async def resolve_org_paths(
-    ctx: OrgContext = None,
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ) -> OrgPaths:
     """
     Build org-scoped directory paths.
     When auth is disabled, returns the original flat global paths.
     """
-    if ctx is None:
-        ctx = await get_org_context()
+    user = await get_current_user(authorization)
+    ctx = await get_org_context(authorization, x_org_id)
 
     config = get_auth_config()
 

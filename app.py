@@ -8,9 +8,11 @@ Usage:
 """
 
 import json
+import logging
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from anthropic import Anthropic
@@ -18,10 +20,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from auth import (
     OrgContext,
@@ -35,6 +38,17 @@ from process import extract
 from sql_gen import generate_create_table, json_to_sql
 
 llm = Anthropic()
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("autopdf2sqlizer")
 
 # ---------------------------------------------------------------------------
 # Paths (global — built-in schemas only; org data uses OrgPaths)
@@ -51,11 +65,42 @@ app = FastAPI(title="autoPDF2SQLizer", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "https://autopdf2sqlizer.azurewebsites.net",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---------------------------------------------------------------------------
+# Request logging middleware
+# ---------------------------------------------------------------------------
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if not request.url.path.startswith("/api/"):
+            return await call_next(request)
+
+        start = time.time()
+        org_id = request.headers.get("x-org-id", "-")
+        method = request.method
+        path = request.url.path
+
+        response = await call_next(request)
+
+        duration_ms = (time.time() - start) * 1000
+        logger.info(
+            f"{method} {path} → {response.status_code} "
+            f"({duration_ms:.0f}ms) org={org_id}"
+        )
+        return response
+
+
+app.add_middleware(RequestLoggingMiddleware)
 
 # Serve React build if available, fall back to legacy static/
 STATIC_BUILD_DIR = BASE_DIR / "static-build"
