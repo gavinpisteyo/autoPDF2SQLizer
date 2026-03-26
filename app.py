@@ -8,6 +8,7 @@ Usage:
 """
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -17,35 +18,44 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from auth import (
+    OrgContext,
+    OrgPaths,
+    OrgRole,
+    require_at_least,
+    resolve_org_paths,
+)
 from doc_intel import analyze_document, cache_result, get_cached_result
 from process import extract
-from sql_gen import json_to_sql, generate_create_table
+from sql_gen import generate_create_table, json_to_sql
 
 llm = Anthropic()
 
 # ---------------------------------------------------------------------------
-# Paths
+# Paths (global — built-in schemas only; org data uses OrgPaths)
 # ---------------------------------------------------------------------------
 
 BASE_DIR = Path(__file__).parent
 SCHEMAS_DIR = BASE_DIR / "schemas"
-CUSTOM_SCHEMAS_DIR = SCHEMAS_DIR / "custom"
-GROUND_TRUTH_DIR = BASE_DIR / "ground_truth"
-UPLOADS_DIR = BASE_DIR / "uploads"
-RESULTS_DIR = BASE_DIR / "results"
-
-for d in [CUSTOM_SCHEMAS_DIR, GROUND_TRUTH_DIR, UPLOADS_DIR, RESULTS_DIR]:
-    d.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="autoPDF2SQLizer", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:8000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Serve React build if available, fall back to legacy static/
 STATIC_BUILD_DIR = BASE_DIR / "static-build"
@@ -70,20 +80,27 @@ else:
 # ---------------------------------------------------------------------------
 
 @app.get("/api/schemas")
-async def list_schemas():
+async def list_schemas(
+    paths: OrgPaths = Depends(resolve_org_paths),
+):
     """List all available document type schemas."""
     schemas = {}
+    # Built-in schemas (global, read-only)
     for path in sorted(SCHEMAS_DIR.glob("*.json")):
         schemas[path.stem] = {"builtin": True}
-    for path in sorted(CUSTOM_SCHEMAS_DIR.glob("*.json")):
+    # Org-specific custom schemas
+    for path in sorted(paths.custom_schemas.glob("*.json")):
         schemas[path.stem] = {"builtin": False}
     return schemas
 
 
 @app.get("/api/schemas/{doc_type}")
-async def get_schema(doc_type: str):
+async def get_schema(
+    doc_type: str,
+    paths: OrgPaths = Depends(resolve_org_paths),
+):
     """Get a specific schema by document type."""
-    for parent in [SCHEMAS_DIR, CUSTOM_SCHEMAS_DIR]:
+    for parent in [SCHEMAS_DIR, paths.custom_schemas]:
         path = parent / f"{doc_type}.json"
         if path.exists():
             with open(path) as f:
@@ -92,10 +109,20 @@ async def get_schema(doc_type: str):
 
 
 @app.post("/api/schemas/{doc_type}")
-async def save_custom_schema(doc_type: str, schema: dict):
-    """Save a custom schema for a new document type."""
-    CUSTOM_SCHEMAS_DIR.mkdir(parents=True, exist_ok=True)
-    path = CUSTOM_SCHEMAS_DIR / f"{doc_type}.json"
+async def save_custom_schema(
+    doc_type: str,
+    schema: dict,
+    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
+    paths: OrgPaths = Depends(resolve_org_paths),
+):
+    """Save a custom schema. Business users can create new; only dev+ can overwrite."""
+    path = paths.custom_schemas / f"{doc_type}.json"
+
+    # Business users can create new schemas but not overwrite existing ones
+    if path.exists() and ctx.role == OrgRole.BUSINESS_USER:
+        raise HTTPException(403, "Business users cannot edit existing schemas")
+
+    paths.custom_schemas.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         json.dump(schema, f, indent=2)
     return {"status": "saved", "path": str(path)}
@@ -110,11 +137,12 @@ async def extract_pdf(
     file: UploadFile = File(...),
     doc_type: str = Form(...),
     custom_schema: str = Form(None),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
+    paths: OrgPaths = Depends(resolve_org_paths),
 ):
     """Upload a PDF, run Doc Intel + extraction, return structured data."""
 
-    # Save uploaded file
-    upload_path = UPLOADS_DIR / file.filename
+    upload_path = paths.uploads / file.filename
     with open(upload_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
@@ -124,7 +152,7 @@ async def extract_pdf(
     else:
         schema_path = SCHEMAS_DIR / f"{doc_type}.json"
         if not schema_path.exists():
-            schema_path = CUSTOM_SCHEMAS_DIR / f"{doc_type}.json"
+            schema_path = paths.custom_schemas / f"{doc_type}.json"
         if not schema_path.exists():
             raise HTTPException(404, f"No schema for type: {doc_type}")
         with open(schema_path) as f:
@@ -138,8 +166,8 @@ async def extract_pdf(
     except Exception as e:
         raise HTTPException(500, f"Document Intelligence error: {e}")
 
-    # Cache the raw result so it's available for the Wiggum loop later
-    cache_result(doc_type, upload_path.stem, raw)
+    # Cache the raw result (org-scoped)
+    cache_result(doc_type, upload_path.stem, raw, base_dir=paths.cache)
 
     # Run extraction
     try:
@@ -148,7 +176,7 @@ async def extract_pdf(
         raise HTTPException(500, f"Extraction error: {e}")
 
     # Save result
-    result_path = RESULTS_DIR / f"{upload_path.stem}.json"
+    result_path = paths.results / f"{upload_path.stem}.json"
     with open(result_path, "w") as f:
         json.dump(result, f, indent=2)
 
@@ -165,12 +193,14 @@ async def extract_pdf(
 # ---------------------------------------------------------------------------
 
 @app.get("/api/ground-truth")
-async def list_ground_truth():
+async def list_ground_truth(
+    paths: OrgPaths = Depends(resolve_org_paths),
+):
     """List all ground truth document sets."""
     docs = []
-    if not GROUND_TRUTH_DIR.exists():
+    if not paths.ground_truth.exists():
         return docs
-    for type_dir in sorted(GROUND_TRUTH_DIR.iterdir()):
+    for type_dir in sorted(paths.ground_truth.iterdir()):
         if not type_dir.is_dir() or type_dir.name.startswith("."):
             continue
         for pdf in sorted(type_dir.glob("*.pdf")):
@@ -179,7 +209,7 @@ async def list_ground_truth():
                 "doc_type": type_dir.name,
                 "name": pdf.stem,
                 "has_truth_json": truth.exists(),
-                "has_cache": get_cached_result(type_dir.name, pdf.stem) is not None,
+                "has_cache": get_cached_result(type_dir.name, pdf.stem, base_dir=paths.cache) is not None,
             })
     return docs
 
@@ -189,9 +219,11 @@ async def upload_ground_truth(
     pdf: UploadFile = File(...),
     truth_json: UploadFile = File(...),
     doc_type: str = Form(...),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.DEVELOPER)),
+    paths: OrgPaths = Depends(resolve_org_paths),
 ):
     """Upload a ground truth document (PDF + known-correct JSON)."""
-    type_dir = GROUND_TRUTH_DIR / doc_type
+    type_dir = paths.ground_truth / doc_type
     type_dir.mkdir(parents=True, exist_ok=True)
 
     stem = Path(pdf.filename).stem
@@ -202,7 +234,6 @@ async def upload_ground_truth(
 
     truth_path = type_dir / f"{stem}.json"
     content = await truth_json.read()
-    # Validate it's valid JSON
     try:
         json.loads(content)
     except json.JSONDecodeError:
@@ -220,22 +251,27 @@ async def upload_ground_truth(
 
 
 @app.post("/api/cache")
-async def cache_ground_truth():
+async def cache_ground_truth(
+    ctx: OrgContext = Depends(require_at_least(OrgRole.DEVELOPER)),
+    paths: OrgPaths = Depends(resolve_org_paths),
+):
     """Run Azure Doc Intel on all uncached ground truth PDFs."""
     results = []
-    for type_dir in sorted(GROUND_TRUTH_DIR.iterdir()):
+    if not paths.ground_truth.exists():
+        return results
+    for type_dir in sorted(paths.ground_truth.iterdir()):
         if not type_dir.is_dir() or type_dir.name.startswith("."):
             continue
         for pdf in sorted(type_dir.glob("*.pdf")):
             name = pdf.stem
             doc_type = type_dir.name
-            cached = get_cached_result(doc_type, name)
+            cached = get_cached_result(doc_type, name, base_dir=paths.cache)
             if cached is not None:
                 results.append({"name": name, "doc_type": doc_type, "status": "already_cached"})
                 continue
             try:
                 raw = analyze_document(str(pdf))
-                cache_result(doc_type, name, raw)
+                cache_result(doc_type, name, raw, base_dir=paths.cache)
                 results.append({"name": name, "doc_type": doc_type, "status": "cached"})
             except Exception as e:
                 results.append({"name": name, "doc_type": doc_type, "status": f"error: {e}"})
@@ -247,8 +283,18 @@ async def cache_ground_truth():
 # ---------------------------------------------------------------------------
 
 @app.post("/api/generate-schema")
-async def generate_schema(description: str = Form(...), doc_type_key: str = Form(...)):
+async def generate_schema(
+    description: str = Form(...),
+    doc_type_key: str = Form(...),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
+    paths: OrgPaths = Depends(resolve_org_paths),
+):
     """Generate a JSON Schema from a plain-English description of desired fields."""
+
+    # Business users can generate new schemas but not overwrite existing
+    existing_path = paths.custom_schemas / f"{doc_type_key}.json"
+    if existing_path.exists() and ctx.role == OrgRole.BUSINESS_USER:
+        raise HTTPException(403, "Business users cannot overwrite existing schemas")
 
     system = """You are a JSON Schema generator. The user will describe what fields
 they want to extract from a document. Generate a valid JSON Schema with:
@@ -273,7 +319,6 @@ Return ONLY the JSON Schema — no markdown fences, no explanation."""
         text = response.content[0].text
         schema = json.loads(text)
     except json.JSONDecodeError:
-        import re
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
             schema = json.loads(match.group())
@@ -283,8 +328,8 @@ Return ONLY the JSON Schema — no markdown fences, no explanation."""
         raise HTTPException(500, f"Schema generation error: {e}")
 
     # Auto-save as custom schema
-    CUSTOM_SCHEMAS_DIR.mkdir(parents=True, exist_ok=True)
-    path = CUSTOM_SCHEMAS_DIR / f"{doc_type_key}.json"
+    paths.custom_schemas.mkdir(parents=True, exist_ok=True)
+    path = paths.custom_schemas / f"{doc_type_key}.json"
     with open(path, "w") as f:
         json.dump(schema, f, indent=2)
 
@@ -300,33 +345,27 @@ async def save_as_ground_truth(
     source_file: str = Form(...),
     doc_type: str = Form(...),
     corrected_json: str = Form(...),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.DEVELOPER)),
+    paths: OrgPaths = Depends(resolve_org_paths),
 ):
-    """
-    Save a corrected extraction result as ground truth.
-    Copies the PDF from uploads/ to ground_truth/<doc_type>/ and
-    saves the corrected JSON alongside it.
-    """
-    # Validate the corrected JSON
+    """Save a corrected extraction result as ground truth."""
     try:
         truth_data = json.loads(corrected_json)
     except json.JSONDecodeError:
         raise HTTPException(400, "corrected_json must be valid JSON")
 
-    # Find the source PDF in uploads/
-    source_path = UPLOADS_DIR / source_file
+    source_path = paths.uploads / source_file
     if not source_path.exists():
         raise HTTPException(404, f"Source PDF not found in uploads: {source_file}")
 
     stem = source_path.stem
 
-    # Copy PDF to ground truth
-    type_dir = GROUND_TRUTH_DIR / doc_type
+    type_dir = paths.ground_truth / doc_type
     type_dir.mkdir(parents=True, exist_ok=True)
 
     gt_pdf_path = type_dir / f"{stem}.pdf"
     shutil.copy2(source_path, gt_pdf_path)
 
-    # Save corrected JSON
     gt_json_path = type_dir / f"{stem}.json"
     with open(gt_json_path, "w") as f:
         json.dump(truth_data, f, indent=2)
@@ -351,6 +390,7 @@ async def api_generate_sql(
     dialect: str = Form("mssql"),
     schema_name: str = Form("dbo"),
     include_ddl: bool = Form(False),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
 ):
     """Generate SQL INSERT (and optionally CREATE TABLE) from extracted JSON."""
     try:
@@ -361,7 +401,7 @@ async def api_generate_sql(
     sql_parts = []
     if include_ddl:
         sql_parts.append(generate_create_table(data, table_name, dialect, schema_name))
-        sql_parts.append("")  # blank line separator
+        sql_parts.append("")
     sql_parts.append(json_to_sql(data, table_name, dialect, schema_name))
 
     return {"sql": "\n".join(sql_parts), "dialect": dialect, "table_name": table_name}
@@ -371,8 +411,9 @@ async def api_generate_sql(
 async def api_execute_sql(
     sql: str = Form(...),
     connection_string: str = Form(...),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.ORG_ADMIN)),
 ):
-    """Execute SQL against a database. Uses SQLAlchemy for dialect support."""
+    """Execute SQL against a database. Org admin only."""
     from sqlalchemy import create_engine, text
 
     try:
@@ -402,7 +443,10 @@ async def api_execute_sql(
 
 
 @app.post("/api/test-connection")
-async def api_test_connection(connection_string: str = Form(...)):
+async def api_test_connection(
+    connection_string: str = Form(...),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.DEVELOPER)),
+):
     """Test a database connection."""
     from sqlalchemy import create_engine, text
 
@@ -421,7 +465,9 @@ async def api_test_connection(connection_string: str = Form(...)):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/evaluate")
-async def run_evaluation():
+async def run_evaluation(
+    ctx: OrgContext = Depends(require_at_least(OrgRole.DEVELOPER)),
+):
     """Run the full evaluation pipeline and return results."""
     try:
         result = subprocess.run(

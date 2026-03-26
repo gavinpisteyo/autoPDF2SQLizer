@@ -21,10 +21,14 @@ certifi==2026.2.25
     #   httpcore
     #   httpx
     #   requests
+cffi==2.0.0
+    # via cryptography
 charset-normalizer==3.4.6
     # via requests
 click==8.3.1
     # via uvicorn
+cryptography==46.0.6
+    # via pyjwt
 distro==1.9.0
     # via anthropic
 docstring-parser==0.17.0
@@ -56,17 +60,25 @@ jiter==0.13.0
     # via anthropic
 packaging==26.0
     # via gunicorn
+pycparser==3.0
+    # via cffi
 pydantic==2.12.5
     # via
     #   anthropic
     #   fastapi
+    #   pydantic-settings
 pydantic-core==2.41.5
     # via pydantic
+pydantic-settings==2.13.1
+    # via autopdf2sqlizer (pyproject.toml)
+pyjwt==2.12.1
+    # via autopdf2sqlizer (pyproject.toml)
 pymssql==2.3.13
     # via autopdf2sqlizer (pyproject.toml)
 python-dotenv==1.2.2
     # via
     #   autopdf2sqlizer (pyproject.toml)
+    #   pydantic-settings
     #   uvicorn
 python-multipart==0.0.22
     # via autopdf2sqlizer (pyproject.toml)
@@ -86,10 +98,12 @@ typing-extensions==4.15.0
     #   anyio
     #   azure-ai-documentintelligence
     #   azure-core
+    #   cryptography
     #   exceptiongroup
     #   fastapi
     #   pydantic
     #   pydantic-core
+    #   pyjwt
     #   sqlalchemy
     #   starlette
     #   typing-inspection
@@ -98,6 +112,7 @@ typing-inspection==0.4.2
     # via
     #   fastapi
     #   pydantic
+    #   pydantic-settings
 urllib3==2.6.3
     # via requests
 uvicorn==0.42.0
