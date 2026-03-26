@@ -1,18 +1,19 @@
 /**
  * API client factory — creates an authenticated API client that injects
- * Bearer tokens and org context headers into every request.
+ * Bearer tokens, org context, and project context headers into every request.
  */
 
 const BASE = '/api';
 
 export type GetToken = () => Promise<string>;
 
-export function createApiClient(getToken: GetToken, orgId: string) {
+export function createApiClient(getToken: GetToken, orgId: string, projectId: string = '') {
   async function headers(): Promise<Record<string, string>> {
     const h: Record<string, string> = {};
     const token = await getToken();
     if (token) h['Authorization'] = `Bearer ${token}`;
     if (orgId) h['X-Org-Id'] = orgId;
+    if (projectId) h['X-Project-Id'] = projectId;
     return h;
   }
 
@@ -33,6 +34,14 @@ export function createApiClient(getToken: GetToken, orgId: string) {
   async function get(path: string) {
     const h = await headers();
     const res = await fetch(`${BASE}${path}`, { headers: h });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Request failed');
+    return data;
+  }
+
+  async function del(path: string) {
+    const h = await headers();
+    const res = await fetch(`${BASE}${path}`, { method: 'DELETE', headers: h });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Request failed');
     return data;
@@ -112,6 +121,44 @@ export function createApiClient(getToken: GetToken, orgId: string) {
     return post('/generate-schema', fd);
   }
 
+  // -- Organizations --
+  async function requestJoinOrg(targetOrgId: string) {
+    const fd = new FormData();
+    fd.append('org_id', targetOrgId);
+    return post('/orgs/join', fd);
+  }
+
+  const listJoinRequests = () => get('/orgs/requests');
+
+  async function resolveJoinRequest(requestId: string, approve: boolean) {
+    const fd = new FormData();
+    fd.append('approve', String(approve));
+    return post(`/orgs/requests/${requestId}/resolve`, fd);
+  }
+
+  // -- Projects --
+  const listProjects = () => get('/projects');
+
+  async function createProject(name: string, slug: string, description: string = '') {
+    const fd = new FormData();
+    fd.append('name', name);
+    fd.append('slug', slug);
+    fd.append('description', description);
+    return post('/projects', fd);
+  }
+
+  const getProject = (projectId: string) => get(`/projects/${projectId}`);
+
+  async function addProjectMember(projectId: string, userSub: string, userEmail: string = '') {
+    const fd = new FormData();
+    fd.append('user_sub', userSub);
+    fd.append('user_email', userEmail);
+    return post(`/projects/${projectId}/members`, fd);
+  }
+
+  const removeProjectMember = (projectId: string, userSub: string) =>
+    del(`/projects/${projectId}/members/${userSub}`);
+
   return {
     listSchemas, getSchema, saveSchema,
     extractPdf,
@@ -119,6 +166,8 @@ export function createApiClient(getToken: GetToken, orgId: string) {
     runEvaluation,
     generateSql, executeSql, testConnection,
     generateSchema,
+    requestJoinOrg, listJoinRequests, resolveJoinRequest,
+    listProjects, createProject, getProject, addProjectMember, removeProjectMember,
   };
 }
 

@@ -29,7 +29,7 @@ const TABS: TabDef[] = [
 
 export default function App() {
   const auth = useAuthContext();
-  const { isAuthenticated, isLoading, getToken, orgId, roleAtLeast } = auth;
+  const { isAuthenticated, isLoading, getToken, orgId, projectId, roleAtLeast } = auth;
 
   const [activeTab, setActiveTab] = useState<TabId>('extract');
   const [schemas, setSchemas] = useState<Record<string, { builtin: boolean }>>({});
@@ -44,8 +44,8 @@ export default function App() {
 
   // Create authenticated API client
   const api: ApiClient = useMemo(
-    () => createApiClient(getToken, orgId),
-    [getToken, orgId],
+    () => createApiClient(getToken, orgId, projectId),
+    [getToken, orgId, projectId],
   );
 
   const loadSchemas = useCallback(async () => {
@@ -87,7 +87,7 @@ export default function App() {
 
   return (
     <div className="max-w-[1000px] mx-auto px-8 pt-12 pb-16">
-      <TopBar />
+      <TopBar api={api} />
 
       {/* Navigation */}
       <nav className="flex border-b border-border mb-10">
@@ -127,7 +127,7 @@ export default function App() {
       {activeTab === 'schemas' && (
         <SchemasTab schemas={schemas} onSchemasChanged={loadSchemas} api={api} />
       )}
-      {activeTab === 'profile' && <ProfileTab />}
+      {activeTab === 'profile' && <ProfileTab api={api} />}
     </div>
   );
 }

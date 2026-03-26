@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -118,6 +118,123 @@ else:
     @app.get("/")
     async def index():
         return FileResponse(str(LEGACY_STATIC_DIR / "index.html"))
+
+
+# ---------------------------------------------------------------------------
+# Organizations & Projects
+# ---------------------------------------------------------------------------
+
+import re as _re
+import metadata as db
+from auth import get_current_user, get_org_context
+from auth.models import AuthUser
+
+
+@app.post("/api/orgs/join")
+async def request_join_org(
+    org_id: str = Form(...),
+    authorization: str = Header(default=""),
+):
+    """Request to join an organization. Admin must approve."""
+    user = await get_current_user(authorization)
+    try:
+        req = db.create_join_request(org_id, user.sub, user.email, user.name)
+        return req.to_dict()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/orgs/requests")
+async def list_join_requests(
+    ctx: OrgContext = Depends(require_at_least(OrgRole.ORG_ADMIN)),
+):
+    """List pending join requests for the current org. Admin only."""
+    return db.list_join_requests(ctx.org_id, status="pending")
+
+
+@app.post("/api/orgs/requests/{request_id}/resolve")
+async def resolve_join_request(
+    request_id: str,
+    approve: bool = Form(...),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.ORG_ADMIN)),
+):
+    """Approve or reject a join request. Admin only."""
+    result = db.resolve_join_request(request_id, ctx.user.sub, approve)
+    if not result:
+        raise HTTPException(404, "Request not found")
+    return result.to_dict()
+
+
+@app.get("/api/projects")
+async def list_projects(
+    ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
+):
+    """List projects in the current org. Admins see all; others see assigned only."""
+    is_admin = ctx.role == OrgRole.ORG_ADMIN
+    return db.list_projects(ctx.org_id, ctx.user.sub, is_admin)
+
+
+@app.post("/api/projects")
+async def create_project(
+    name: str = Form(...),
+    slug: str = Form(...),
+    description: str = Form(""),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.ORG_ADMIN)),
+):
+    """Create a new project in the current org. Admin only."""
+    clean_slug = _re.sub(r"[^\w\-]", "-", slug.lower().strip())
+    if not clean_slug:
+        raise HTTPException(400, "Invalid slug")
+
+    existing = db.get_project_by_slug(ctx.org_id, clean_slug)
+    if existing:
+        raise HTTPException(409, f"Project with slug '{clean_slug}' already exists")
+
+    project = db.create_project(ctx.org_id, name, clean_slug, description, ctx.user.sub)
+    return project.to_dict()
+
+
+@app.get("/api/projects/{project_id}")
+async def get_project(
+    project_id: str,
+    ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
+):
+    """Get project details + members."""
+    project = db.get_project(project_id)
+    if not project or project.org_id != ctx.org_id:
+        raise HTTPException(404, "Project not found")
+    if ctx.role != OrgRole.ORG_ADMIN and not db.is_project_member(project_id, ctx.user.sub):
+        raise HTTPException(403, "Not a member of this project")
+
+    members = db.list_project_members(project_id)
+    return {**project.to_dict(), "members": members}
+
+
+@app.post("/api/projects/{project_id}/members")
+async def add_project_member(
+    project_id: str,
+    user_sub: str = Form(...),
+    user_email: str = Form(""),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.ORG_ADMIN)),
+):
+    """Add a member to a project. Admin only."""
+    project = db.get_project(project_id)
+    if not project or project.org_id != ctx.org_id:
+        raise HTTPException(404, "Project not found")
+
+    db.add_project_member(project_id, user_sub, user_email, ctx.user.sub)
+    return {"status": "added", "project_id": project_id, "user_sub": user_sub}
+
+
+@app.delete("/api/projects/{project_id}/members/{user_sub}")
+async def remove_project_member(
+    project_id: str,
+    user_sub: str,
+    ctx: OrgContext = Depends(require_at_least(OrgRole.ORG_ADMIN)),
+):
+    """Remove a member from a project. Admin only."""
+    db.remove_project_member(project_id, user_sub)
+    return {"status": "removed"}
 
 
 # ---------------------------------------------------------------------------

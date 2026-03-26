@@ -126,12 +126,13 @@ async def get_org_context(
 async def resolve_org_paths(
     authorization: str = Header(default=""),
     x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
 ) -> OrgPaths:
     """
-    Build org-scoped directory paths.
+    Build org+project scoped directory paths.
     When auth is disabled, returns the original flat global paths.
+    When a project is specified, data is scoped to data/{org_id}/{project_slug}/.
     """
-    user = await get_current_user(authorization)
     ctx = await get_org_context(authorization, x_org_id)
 
     config = get_auth_config()
@@ -145,10 +146,28 @@ async def resolve_org_paths(
             cache=GLOBAL_CACHE_DIR,
             results=GLOBAL_RESULTS_DIR,
         )
+    elif x_project_id:
+        # Project-scoped: data/{org_id}/{project_id}/
+        from metadata import get_project, is_project_member
+        project = get_project(x_project_id)
+        if not project or project.org_id != ctx.org_id:
+            raise HTTPException(404, "Project not found")
+        if ctx.role != OrgRole.ORG_ADMIN and not is_project_member(x_project_id, ctx.user.sub):
+            raise HTTPException(403, "You are not a member of this project")
+        project_dir = DATA_DIR / ctx.org_id / project.slug
+        paths = OrgPaths(
+            schemas=GLOBAL_SCHEMAS_DIR,
+            custom_schemas=project_dir / "schemas" / "custom",
+            ground_truth=project_dir / "ground_truth",
+            uploads=project_dir / "uploads",
+            cache=project_dir / "cache",
+            results=project_dir / "results",
+        )
     else:
+        # Org-level (no project selected)
         org_dir = DATA_DIR / ctx.org_id
         paths = OrgPaths(
-            schemas=GLOBAL_SCHEMAS_DIR,  # built-in schemas are always global
+            schemas=GLOBAL_SCHEMAS_DIR,
             custom_schemas=org_dir / "schemas" / "custom",
             ground_truth=org_dir / "ground_truth",
             uploads=org_dir / "uploads",

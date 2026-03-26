@@ -34,11 +34,13 @@ export type OrgRole = 'org_admin' | 'developer' | 'business_user' | 'viewer';
 interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
-  user: { name: string; email: string; picture?: string } | null;
+  user: { name: string; email: string; picture?: string; sub?: string } | null;
   orgId: string;
+  projectId: string;
   role: OrgRole;
   getToken: () => Promise<string>;
   switchOrg: (orgId: string) => void;
+  setProjectId: (id: string) => void;
   login: () => void;
   logout: () => void;
   hasPermission: (perm: string) => boolean;
@@ -72,19 +74,23 @@ export function useAuthContext(): AuthContextValue {
 // ---------------------------------------------------------------------------
 
 function DevAuthProvider({ children }: { children: ReactNode }) {
+  const [projectId, setProjectId] = useState(() => localStorage.getItem('active_project_id') || '');
+
   const value: AuthContextValue = useMemo(() => ({
     isAuthenticated: true,
     isLoading: false,
-    user: { name: 'Dev User', email: 'dev@localhost' },
+    user: { name: 'Dev User', email: 'dev@localhost', sub: 'dev|local' },
     orgId: 'default',
+    projectId,
     role: 'org_admin' as OrgRole,
     getToken: async () => '',
     switchOrg: () => {},
+    setProjectId: (id: string) => { setProjectId(id); localStorage.setItem('active_project_id', id); },
     login: () => {},
     logout: () => {},
     hasPermission: () => true,
     roleAtLeast: () => true,
-  }), []);
+  }), [projectId]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -104,6 +110,7 @@ function Auth0InnerProvider({ children }: { children: ReactNode }) {
   } = useAuth0();
 
   const [orgId, setOrgId] = useState(() => localStorage.getItem('active_org_id') || '');
+  const [projectId, setProjectIdState] = useState(() => localStorage.getItem('active_project_id') || '');
   const [permissions, setPermissions] = useState<string[]>([]);
 
   // Extract permissions from token when authenticated
@@ -144,8 +151,14 @@ function Auth0InnerProvider({ children }: { children: ReactNode }) {
     loginWithRedirect();
   }, [loginWithRedirect]);
 
+  const setProjectId = useCallback((id: string) => {
+    setProjectIdState(id);
+    localStorage.setItem('active_project_id', id);
+  }, []);
+
   const logout = useCallback(() => {
     localStorage.removeItem('active_org_id');
+    localStorage.removeItem('active_project_id');
     auth0Logout({ logoutParams: { returnTo: window.location.origin } });
   }, [auth0Logout]);
 
@@ -162,16 +175,19 @@ function Auth0InnerProvider({ children }: { children: ReactNode }) {
       name: auth0User.name || auth0User.email || '',
       email: auth0User.email || '',
       picture: auth0User.picture,
+      sub: auth0User.sub,
     } : null,
     orgId,
+    projectId,
     role,
     getToken,
     switchOrg,
+    setProjectId,
     login,
     logout,
     hasPermission,
     roleAtLeast,
-  }), [isAuthenticated, isLoading, auth0User, orgId, role, getToken, switchOrg, login, logout, hasPermission, roleAtLeast]);
+  }), [isAuthenticated, isLoading, auth0User, orgId, projectId, role, getToken, switchOrg, setProjectId, login, logout, hasPermission, roleAtLeast]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

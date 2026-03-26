@@ -1,7 +1,13 @@
 import { useAuthContext, AUTH_ENABLED } from '../lib/auth';
+import type { ApiClient } from '../lib/api';
 import OrgSwitcher from './OrgSwitcher';
+import ProjectSwitcher from './ProjectSwitcher';
 
-export default function TopBar() {
+interface TopBarProps {
+  api: ApiClient;
+}
+
+export default function TopBar({ api }: TopBarProps) {
   const { user, role, logout } = useAuthContext();
 
   return (
@@ -15,10 +21,11 @@ export default function TopBar() {
         </p>
       </div>
 
-      {AUTH_ENABLED && user && (
-        <div className="flex items-center gap-3">
-          <OrgSwitcher />
+      <div className="flex items-center gap-3">
+        {AUTH_ENABLED && <OrgSwitcher />}
+        <ProjectSwitcher api={api} />
 
+        {user && (
           <div className="flex items-center gap-2.5">
             {user.picture && (
               <img src={user.picture} alt="" className="w-7 h-7 rounded-full" />
@@ -28,7 +35,9 @@ export default function TopBar() {
               <div className="text-[0.6875rem] text-mid">{role}</div>
             </div>
           </div>
+        )}
 
+        {AUTH_ENABLED && (
           <button
             onClick={logout}
             className="px-3 py-1.5 text-xs font-medium bg-transparent border border-border-strong
@@ -36,8 +45,8 @@ export default function TopBar() {
           >
             Sign Out
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
