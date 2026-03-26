@@ -30,7 +30,7 @@ const TABS: TabDef[] = [
 
 export default function App() {
   const auth = useAuthContext();
-  const { isAuthenticated, isLoading, getToken, orgId, projectId, roleAtLeast, user } = auth;
+  const { isAuthenticated, isLoading, getToken, orgId, projectId, roleAtLeast, user, setRole } = auth;
 
   const [activeTab, setActiveTab] = useState<TabId>('extract');
   const [schemas, setSchemas] = useState<Record<string, { builtin: boolean }>>({});
@@ -64,6 +64,16 @@ export default function App() {
       setOnboardingChecked(true);
     }).catch(() => { setOnboardingChecked(true); });
   }, [isAuthenticated]);
+
+  // Fetch actual role from backend (metadata DB) whenever org changes
+  useEffect(() => {
+    if (!isAuthenticated || !orgId) return;
+    api.getMe().then((me: { role: string }) => {
+      if (me.role) {
+        setRole(me.role as 'org_admin' | 'developer' | 'business_user' | 'viewer');
+      }
+    }).catch(() => {});
+  }, [isAuthenticated, orgId, api, setRole]);
 
   const loadSchemas = useCallback(async () => {
     try {

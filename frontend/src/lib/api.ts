@@ -47,6 +47,9 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
     return data;
   }
 
+  // -- Me --
+  const getMe = () => get('/me');
+
   // -- Schemas --
   const listSchemas = () => get('/schemas');
   const getSchema = (docType: string) => get(`/schemas/${docType}`);
@@ -168,6 +171,7 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
     del(`/projects/${projectId}/members/${userSub}`);
 
   return {
+    getMe,
     listSchemas, getSchema, saveSchema,
     extractPdf,
     listGroundTruth, uploadGroundTruth, saveAsGroundTruth, cacheGroundTruth,

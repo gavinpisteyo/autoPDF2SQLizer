@@ -130,6 +130,34 @@ from auth import get_current_user, get_org_context
 from auth.models import AuthUser
 
 
+@app.get("/api/me")
+async def get_me(
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+):
+    """Get current user info + resolved role for active org."""
+    user = await get_current_user(authorization)
+    role = "viewer"
+    org_id = user.org_id or x_org_id
+    if org_id:
+        # Check local DB for role
+        local_role = db.get_user_org_role(org_id, user.sub)
+        if local_role:
+            role = local_role
+        # Auth0 permissions override if present
+        from auth.models import resolve_role as _resolve, OrgRole
+        token_role = _resolve(user.permissions)
+        if token_role != OrgRole.VIEWER:
+            role = token_role.value
+    return {
+        "sub": user.sub,
+        "email": user.email,
+        "name": user.name,
+        "org_id": org_id,
+        "role": role,
+    }
+
+
 @app.post("/api/orgs")
 async def create_org(
     name: str = Form(...),

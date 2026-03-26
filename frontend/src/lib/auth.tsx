@@ -41,6 +41,7 @@ interface AuthContextValue {
   getToken: () => Promise<string>;
   switchOrg: (orgId: string) => void;
   setProjectId: (id: string) => void;
+  setRole: (role: OrgRole) => void;
   login: () => void;
   logout: () => void;
   hasPermission: (perm: string) => boolean;
@@ -86,6 +87,7 @@ function DevAuthProvider({ children }: { children: ReactNode }) {
     getToken: async () => '',
     switchOrg: () => {},
     setProjectId: (id: string) => { setProjectId(id); localStorage.setItem('active_project_id', id); },
+    setRole: () => {},
     login: () => {},
     logout: () => {},
     hasPermission: () => true,
@@ -129,7 +131,10 @@ function Auth0InnerProvider({ children }: { children: ReactNode }) {
     }).catch(() => {});
   }, [isAuthenticated, getAccessTokenSilently, orgId]);
 
-  const role = resolveRole(permissions);
+  const [roleOverride, setRoleOverride] = useState<OrgRole | null>(null);
+  const role = roleOverride || resolveRole(permissions);
+
+  const setRole = useCallback((r: OrgRole) => { setRoleOverride(r); }, []);
 
   const getToken = useCallback(async () => {
     try {
@@ -183,11 +188,12 @@ function Auth0InnerProvider({ children }: { children: ReactNode }) {
     getToken,
     switchOrg,
     setProjectId,
+    setRole,
     login,
     logout,
     hasPermission,
     roleAtLeast,
-  }), [isAuthenticated, isLoading, auth0User, orgId, projectId, role, getToken, switchOrg, setProjectId, login, logout, hasPermission, roleAtLeast]);
+  }), [isAuthenticated, isLoading, auth0User, orgId, projectId, role, getToken, switchOrg, setProjectId, setRole, login, logout, hasPermission, roleAtLeast]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
