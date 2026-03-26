@@ -8,8 +8,9 @@ import GroundTruthTab from './pages/GroundTruthTab';
 import EvaluateTab from './pages/EvaluateTab';
 import DatabaseTab from './pages/DatabaseTab';
 import SchemasTab from './pages/SchemasTab';
+import ProfileTab from './pages/ProfileTab';
 
-type TabId = 'extract' | 'ground-truth' | 'evaluate' | 'database' | 'schemas';
+type TabId = 'extract' | 'ground-truth' | 'evaluate' | 'database' | 'schemas' | 'profile';
 
 interface TabDef {
   id: TabId;
@@ -23,6 +24,7 @@ const TABS: TabDef[] = [
   { id: 'evaluate', label: 'Evaluate', minRole: 'developer' },
   { id: 'database', label: 'Database', minRole: 'developer' },
   { id: 'schemas', label: 'Schemas', minRole: 'viewer' },
+  { id: 'profile', label: 'Profile', minRole: 'viewer' },
 ];
 
 export default function App() {
@@ -125,6 +127,7 @@ export default function App() {
       {activeTab === 'schemas' && (
         <SchemasTab schemas={schemas} onSchemasChanged={loadSchemas} api={api} />
       )}
+      {activeTab === 'profile' && <ProfileTab />}
     </div>
   );
 }
