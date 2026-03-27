@@ -26,15 +26,19 @@ from .models import (
 _jwks_client: PyJWKClient | None = None
 
 BASE_DIR = Path(__file__).parent.parent
-DATA_DIR = BASE_DIR / "data"
+
+# Use persistent storage on Azure App Service (/home/data persists across deploys)
+_azure_data = Path("/home/data")
+PERSISTENT_ROOT = _azure_data if _azure_data.exists() else BASE_DIR
+DATA_DIR = PERSISTENT_ROOT / "data"
 
 # Global fallback dirs (used when auth is disabled)
-GLOBAL_SCHEMAS_DIR = BASE_DIR / "schemas"
-GLOBAL_CUSTOM_SCHEMAS_DIR = GLOBAL_SCHEMAS_DIR / "custom"
-GLOBAL_GROUND_TRUTH_DIR = BASE_DIR / "ground_truth"
-GLOBAL_UPLOADS_DIR = BASE_DIR / "uploads"
-GLOBAL_CACHE_DIR = BASE_DIR / "cache"
-GLOBAL_RESULTS_DIR = BASE_DIR / "results"
+GLOBAL_SCHEMAS_DIR = BASE_DIR / "schemas"  # schemas ship with the code
+GLOBAL_CUSTOM_SCHEMAS_DIR = PERSISTENT_ROOT / "schemas" / "custom"
+GLOBAL_GROUND_TRUTH_DIR = PERSISTENT_ROOT / "ground_truth"
+GLOBAL_UPLOADS_DIR = PERSISTENT_ROOT / "uploads"
+GLOBAL_CACHE_DIR = PERSISTENT_ROOT / "cache"
+GLOBAL_RESULTS_DIR = PERSISTENT_ROOT / "results"
 
 # Mock user for dev mode (all permissions)
 _MOCK_USER = AuthUser(

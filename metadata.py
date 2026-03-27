@@ -11,7 +11,15 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "metadata.db"
+def _resolve_db_path() -> Path:
+    """Use persistent storage on Azure App Service, local file otherwise."""
+    azure_home = Path("/home/data")
+    if azure_home.exists():
+        azure_home.mkdir(parents=True, exist_ok=True)
+        return azure_home / "metadata.db"
+    return Path(__file__).parent / "metadata.db"
+
+DB_PATH = _resolve_db_path()
 
 
 def _get_conn() -> sqlite3.Connection:
