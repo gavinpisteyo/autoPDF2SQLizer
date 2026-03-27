@@ -1,10 +1,17 @@
 .env
+frontend/.env
 .venv/
 __pycache__/
 *.pyc
 cache/
 uploads/
 results/
+data/
 run.log
 results.tsv
 logs/
+knowledge_bases/
+static-build/
+frontend/node_modules/
+test.db
+metadata.db

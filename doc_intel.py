@@ -48,9 +48,10 @@ def analyze_document(pdf_path: str) -> dict:
     return result.as_dict()
 
 
-def cache_result(doc_type: str, doc_name: str, result: dict) -> Path:
+def cache_result(doc_type: str, doc_name: str, result: dict, base_dir: Path | None = None) -> Path:
     """Save a Document Intelligence result to the cache."""
-    cache_dir = CACHE_DIR / doc_type
+    root = base_dir or CACHE_DIR
+    cache_dir = root / doc_type
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / f"{doc_name}.raw.json"
     with open(cache_path, "w") as f:
@@ -58,9 +59,10 @@ def cache_result(doc_type: str, doc_name: str, result: dict) -> Path:
     return cache_path
 
 
-def get_cached_result(doc_type: str, doc_name: str) -> dict | None:
+def get_cached_result(doc_type: str, doc_name: str, base_dir: Path | None = None) -> dict | None:
     """Load a cached Document Intelligence result, or None."""
-    cache_path = CACHE_DIR / doc_type / f"{doc_name}.raw.json"
+    root = base_dir or CACHE_DIR
+    cache_path = root / doc_type / f"{doc_name}.raw.json"
     if cache_path.exists():
         with open(cache_path) as f:
             return json.load(f)

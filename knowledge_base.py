@@ -23,14 +23,28 @@ from anthropic import Anthropic
 # Storage
 # ---------------------------------------------------------------------------
 
-KB_DIR = Path(__file__).parent / "knowledge_bases"
+def _persistent_root() -> Path:
+    """Use persistent storage on Azure, local otherwise."""
+    azure_data = Path("/home/data")
+    if azure_data.exists():
+        return azure_data / "knowledge_bases"
+    return Path(__file__).parent / "knowledge_bases"
+
+KB_DIR = _persistent_root()
 
 
 def _db_path(customer_id: str) -> Path:
-    """Path to a customer's SQLite database."""
+    """Path to a customer's SQLite database. Accepts org_id or org_id/project_slug."""
     KB_DIR.mkdir(parents=True, exist_ok=True)
     safe_id = re.sub(r"[^\w\-]", "_", customer_id)
     return KB_DIR / f"{safe_id}.db"
+
+
+def resolve_kb_id(org_id: str, project_id: str = "") -> str:
+    """Build a knowledge base ID from org + optional project context."""
+    if project_id:
+        return f"{org_id}__{project_id}"
+    return org_id
 
 
 def _get_conn(customer_id: str) -> sqlite3.Connection:

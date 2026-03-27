@@ -1,13 +1,13 @@
 name: Deploy to Azure App Service
 
+# Only runs manually — automatic deploys disabled until Azure credentials are configured
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:  # manual trigger
+  workflow_dispatch:
 
 env:
   AZURE_WEBAPP_NAME: autopdf2sqlizer
   PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
 
 jobs:
   build-and-deploy:
@@ -17,19 +17,43 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # --- Frontend build ---
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend
+        env:
+          VITE_AUTH_ENABLED: ${{ secrets.VITE_AUTH_ENABLED }}
+          VITE_AUTH0_DOMAIN: ${{ secrets.VITE_AUTH0_DOMAIN }}
+          VITE_AUTH0_CLIENT_ID: ${{ secrets.VITE_AUTH0_CLIENT_ID }}
+          VITE_AUTH0_AUDIENCE: ${{ secrets.VITE_AUTH0_AUDIENCE }}
+
+      # --- Backend ---
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Deploy to App Service
-        uses: azure/webapps-deploy@v3
+      # --- Deploy ---
+      - name: Login to Azure
+        uses: azure/login@v2
         with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          startup-command: "gunicorn -w 2 -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:8000 --timeout 120"
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to App Service
+        run: az webapp up --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group n8n-AI-Automations --location centralus
