@@ -170,6 +170,18 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
   const removeProjectMember = (projectId: string, userSub: string) =>
     del(`/projects/${projectId}/members/${userSub}`);
 
+  // -- Wiggum Loop --
+  async function startWiggum(cycles: number, experiments: number, model: string) {
+    const fd = new FormData();
+    fd.append('cycles', String(cycles));
+    fd.append('experiments', String(experiments));
+    fd.append('model', model);
+    return post('/wiggum/start', fd);
+  }
+
+  const getWiggumStatus = () => get('/wiggum/status');
+  const getWiggumHistory = () => get('/wiggum/history');
+
   return {
     getMe,
     listSchemas, getSchema, saveSchema,
@@ -180,6 +192,7 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
     generateSchema,
     createOrg, listMyOrgs, requestJoinOrg, listJoinRequests, resolveJoinRequest,
     listProjects, createProject, getProject, addProjectMember, removeProjectMember,
+    startWiggum, getWiggumStatus, getWiggumHistory,
   };
 }
 

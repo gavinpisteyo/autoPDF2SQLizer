@@ -75,6 +75,24 @@ def init_db():
             resolved_by TEXT DEFAULT '',
             resolved_at TEXT DEFAULT ''
         );
+
+        CREATE TABLE IF NOT EXISTS wiggum_runs (
+            id TEXT PRIMARY KEY,
+            org_id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            branch TEXT NOT NULL,
+            github_run_id INTEGER,
+            status TEXT NOT NULL DEFAULT 'pending',
+            cycles INTEGER DEFAULT 5,
+            experiments INTEGER DEFAULT 5,
+            model TEXT DEFAULT 'claude-sonnet-4-20250514',
+            started_at TEXT NOT NULL,
+            completed_at TEXT,
+            best_accuracy REAL,
+            accuracy_history TEXT,
+            FOREIGN KEY (org_id) REFERENCES orgs(id),
+            FOREIGN KEY (project_id) REFERENCES projects(id)
+        );
     """)
     conn.commit()
     conn.close()
@@ -389,3 +407,115 @@ def add_org_member(org_id: str, user_sub: str, role: str = "viewer",
     )
     conn.commit()
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Wiggum runs
+# ---------------------------------------------------------------------------
+
+@dataclass
+class WiggumRun:
+    id: str
+    org_id: str
+    project_id: str
+    branch: str
+    github_run_id: int | None
+    status: str
+    cycles: int
+    experiments: int
+    model: str
+    started_at: str
+    completed_at: str | None
+    best_accuracy: float | None
+    accuracy_history: str | None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def create_wiggum_run(
+    id: str,
+    org_id: str,
+    project_id: str,
+    branch: str,
+    cycles: int,
+    experiments: int,
+    model: str,
+) -> WiggumRun:
+    """Create a new Wiggum run record."""
+    conn = _get_conn()
+    now = datetime.now(timezone.utc).isoformat()
+
+    conn.execute(
+        "INSERT INTO wiggum_runs (id, org_id, project_id, branch, status, cycles, experiments, model, started_at) "
+        "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+        (id, org_id, project_id, branch, cycles, experiments, model, now),
+    )
+    conn.commit()
+    conn.close()
+
+    return WiggumRun(
+        id=id, org_id=org_id, project_id=project_id, branch=branch,
+        github_run_id=None, status="pending", cycles=cycles,
+        experiments=experiments, model=model, started_at=now,
+        completed_at=None, best_accuracy=None, accuracy_history=None,
+    )
+
+
+def update_wiggum_run(id: str, **kwargs) -> None:
+    """Update fields on a Wiggum run. Only specified kwargs are updated."""
+    if not kwargs:
+        return
+
+    allowed = {
+        "github_run_id", "status", "completed_at",
+        "best_accuracy", "accuracy_history",
+    }
+    invalid = set(kwargs.keys()) - allowed
+    if invalid:
+        raise ValueError(f"Cannot update fields: {invalid}")
+
+    conn = _get_conn()
+    set_clauses = ", ".join(f"{k} = ?" for k in kwargs)
+    values = list(kwargs.values()) + [id]
+
+    conn.execute(
+        f"UPDATE wiggum_runs SET {set_clauses} WHERE id = ?",
+        values,
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_wiggum_run(id: str) -> WiggumRun | None:
+    """Get a single Wiggum run by ID."""
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM wiggum_runs WHERE id = ?", (id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return WiggumRun(**dict(row))
+
+
+def get_latest_wiggum_run(org_id: str, project_id: str) -> WiggumRun | None:
+    """Get the most recent Wiggum run for an org+project."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM wiggum_runs WHERE org_id = ? AND project_id = ? ORDER BY started_at DESC LIMIT 1",
+        (org_id, project_id),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return WiggumRun(**dict(row))
+
+
+def list_wiggum_runs(org_id: str, project_id: str) -> list[dict]:
+    """List all Wiggum runs for an org+project, newest first."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM wiggum_runs WHERE org_id = ? AND project_id = ? ORDER BY started_at DESC",
+        (org_id, project_id),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

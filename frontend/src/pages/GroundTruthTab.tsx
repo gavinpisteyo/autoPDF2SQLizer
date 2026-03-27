@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import DropZone from '../components/DropZone';
 import StatusMessage from '../components/StatusMessage';
+import WiggumPanel from '../components/WiggumPanel';
 import type { ApiClient } from '../lib/api';
 
 interface GtDoc {
@@ -171,6 +172,8 @@ export default function GroundTruthTab({ schemas, refreshKey, api }: GroundTruth
           {cacheStatus && <span className="text-[0.8125rem] text-mid">{cacheStatus}</span>}
         </div>
       </div>
+
+      <WiggumPanel api={api} docs={docs} />
     </div>
   );
 }

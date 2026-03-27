@@ -14,3 +14,4 @@ knowledge_bases/
 static-build/
 frontend/node_modules/
 test.db
+metadata.db

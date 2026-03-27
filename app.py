@@ -36,6 +36,7 @@ from auth import (
 from doc_intel import analyze_document, cache_result, get_cached_result
 from process import extract
 from sql_gen import generate_create_table, json_to_sql
+from wiggum_routes import router as wiggum_router
 
 llm = Anthropic()
 
@@ -119,6 +120,8 @@ else:
     async def index():
         return FileResponse(str(LEGACY_STATIC_DIR / "index.html"))
 
+
+app.include_router(wiggum_router)
 
 # ---------------------------------------------------------------------------
 # Organizations & Projects
