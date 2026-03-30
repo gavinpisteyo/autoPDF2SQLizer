@@ -26,7 +26,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPE
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
+# BaseHTTPMiddleware removed — it breaks file uploads by consuming the request body
 
 from auth import (
     OrgContext,
@@ -75,43 +75,7 @@ app = FastAPI(title="autoPDF2SQLizer", version="0.1.0")
 # Request logging middleware
 # ---------------------------------------------------------------------------
 
-class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        if not request.url.path.startswith("/api/") or request.method == "OPTIONS":
-            return await call_next(request)
-
-        start = time.time()
-        org_id = request.headers.get("x-org-id", "-")
-        method = request.method
-        path = request.url.path
-
-        try:
-            response = await call_next(request)
-        except Exception as e:
-            duration_ms = (time.time() - start) * 1000
-            logger.error(
-                f"{method} {path} → 500 UNHANDLED "
-                f"({duration_ms:.0f}ms) org={org_id} error={e}"
-            )
-            raise
-
-        duration_ms = (time.time() - start) * 1000
-        if response.status_code >= 400:
-            logger.warning(
-                f"{method} {path} → {response.status_code} "
-                f"({duration_ms:.0f}ms) org={org_id}"
-            )
-        else:
-            logger.info(
-                f"{method} {path} → {response.status_code} "
-                f"({duration_ms:.0f}ms) org={org_id}"
-            )
-        return response
-
-
-app.add_middleware(RequestLoggingMiddleware)
-
-# CORS must be added AFTER logging middleware so it runs first (outermost)
+# CORS middleware (no BaseHTTPMiddleware — it breaks file uploads)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
