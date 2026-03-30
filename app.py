@@ -211,6 +211,51 @@ async def debug_auth_test(
     return steps
 
 
+@app.post("/api/debug/upload-test")
+async def debug_upload_test(
+    file: UploadFile = File(...),
+    project_id: str = Form(default="test"),
+    ground_truth: UploadFile = File(default=None),
+):
+    """Debug: test file upload without auth or processing."""
+    import traceback
+    steps = {}
+    try:
+        content = await file.read()
+        steps["file_received"] = {"name": file.filename, "size": len(content)}
+    except Exception as e:
+        steps["file_error"] = traceback.format_exc()
+        return steps
+
+    steps["ground_truth_provided"] = ground_truth is not None and ground_truth.filename is not None
+    steps["project_id"] = project_id
+
+    # Test Doc Intel
+    try:
+        from doc_intel import analyze_document
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        raw = analyze_document(tmp_path)
+        steps["doc_intel"] = {"status": "ok", "pages": len(raw.get("pages", []))}
+        import os
+        os.unlink(tmp_path)
+    except Exception as e:
+        steps["doc_intel"] = {"status": "error", "error": str(e), "tb": traceback.format_exc()}
+        return steps
+
+    # Test extraction
+    try:
+        from process import extract
+        extracted = extract(raw, "test", {"type": "object", "properties": {"title": {"type": "string"}}})
+        steps["extraction"] = {"status": "ok", "fields": list(extracted.keys())[:5]}
+    except Exception as e:
+        steps["extraction"] = {"status": "error", "error": str(e), "tb": traceback.format_exc()}
+
+    return steps
+
+
 @app.get("/api/health")
 async def health():
     """Health check — verifies API keys and services."""
