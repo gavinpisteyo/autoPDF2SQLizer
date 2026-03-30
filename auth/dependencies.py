@@ -28,8 +28,13 @@ _jwks_client: PyJWKClient | None = None
 BASE_DIR = Path(__file__).parent.parent
 
 # Use persistent storage on Azure App Service (/home/data persists across deploys)
-_azure_data = Path("/home/data")
-PERSISTENT_ROOT = _azure_data if _azure_data.exists() else BASE_DIR
+_azure_home = Path("/home")
+if _azure_home.exists():
+    _azure_data = _azure_home / "data"
+    _azure_data.mkdir(parents=True, exist_ok=True)
+    PERSISTENT_ROOT = _azure_data
+else:
+    PERSISTENT_ROOT = BASE_DIR
 DATA_DIR = PERSISTENT_ROOT / "data"
 
 # Global fallback dirs (used when auth is disabled)
