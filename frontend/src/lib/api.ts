@@ -171,6 +171,34 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
   const removeProjectMember = (projectId: string, userSub: string) =>
     del(`/projects/${projectId}/members/${userSub}`);
 
+  // -- Documents --
+  async function uploadDocument(projectId: string, pdfFile: File, groundTruthFile?: File) {
+    const fd = new FormData();
+    fd.append('project_id', projectId);
+    fd.append('file', pdfFile);
+    if (groundTruthFile) fd.append('ground_truth', groundTruthFile);
+    return post('/documents/upload', fd);
+  }
+
+  async function saveCorrections(projectId: string, sourceFile: string, docType: string, correctedJson: Record<string, unknown>) {
+    return post('/documents/correct', {
+      project_id: projectId,
+      source_file: sourceFile,
+      doc_type: docType,
+      corrected_json: correctedJson,
+    });
+  }
+
+  const getProjectSchema = (projectId: string) => get(`/projects/${projectId}/schema`);
+
+  async function startBackgroundOptimization(projectId: string) {
+    const fd = new FormData();
+    fd.append('project_id', projectId);
+    return post('/wiggum/start-background', fd);
+  }
+
+  const getExtractionStatus = (projectId: string) => get(`/projects/${projectId}/extraction-status`);
+
   // -- Wiggum Loop --
   async function startWiggum(cycles: number, experiments: number, model: string) {
     const fd = new FormData();
@@ -209,6 +237,7 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
     generateSchema,
     createOrg, listMyOrgs, getDbStatus, requestJoinOrg, listJoinRequests, resolveJoinRequest,
     listProjects, createProject, getProject, addProjectMember, removeProjectMember,
+    uploadDocument, saveCorrections, getProjectSchema, startBackgroundOptimization, getExtractionStatus,
     startWiggum, getWiggumStatus, getWiggumHistory,
     kbStats, kbSchema, kbIndex, kbQuery,
   };

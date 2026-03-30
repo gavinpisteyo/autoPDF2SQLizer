@@ -1,5 +1,4 @@
 import { useEffect, useState, useRef } from 'react';
-import StatusMessage from '../components/StatusMessage';
 import type { ApiClient } from '../lib/api';
 
 interface KbTableStat {
@@ -21,28 +20,27 @@ interface ChatMessage {
   error?: string | null;
 }
 
-interface KnowledgeBaseTabProps {
+interface ChatTabProps {
   api: ApiClient;
 }
 
-export default function KnowledgeBaseTab({ api }: KnowledgeBaseTabProps) {
+export default function ChatTab({ api }: ChatTabProps) {
   const [stats, setStats] = useState<KbStats | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [indexStatus, setIndexStatus] = useState<{ msg: string; type: 'success' | 'error' | 'loading' | null }>({ msg: '', type: null });
-  const [indexJson, setIndexJson] = useState('');
-  const [indexDocType, setIndexDocType] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const loadStats = async () => {
     try {
       const data = await api.kbStats();
-      setStats(data);
-    } catch {}
+      setStats(data as KbStats);
+    } catch {
+      // Stats not available
+    }
   };
 
-  useEffect(() => { loadStats(); }, []);
+  useEffect(() => { loadStats(); }, [api]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -61,10 +59,10 @@ export default function KnowledgeBaseTab({ api }: KnowledgeBaseTabProps) {
       const data = await api.kbQuery(question);
       const assistantMsg: ChatMessage = {
         role: 'assistant',
-        content: data.answer,
-        sql: data.sql,
-        results: data.results,
-        error: data.error,
+        content: data.answer as string,
+        sql: data.sql as string | undefined,
+        results: data.results as Record<string, unknown>[] | undefined,
+        error: data.error as string | null | undefined,
       };
       setMessages(prev => [...prev, assistantMsg]);
     } catch (e: unknown) {
@@ -78,28 +76,11 @@ export default function KnowledgeBaseTab({ api }: KnowledgeBaseTabProps) {
     }
   };
 
-  const handleIndex = async () => {
-    if (!indexJson.trim() || !indexDocType.trim()) return;
-    setIndexStatus({ msg: 'Indexing...', type: 'loading' });
-    try {
-      const result = await api.kbIndex(indexDocType, indexJson);
-      setIndexStatus({
-        msg: `Indexed into "${result.table}" — ${result.rows_inserted} row(s) inserted`,
-        type: 'success',
-      });
-      setIndexJson('');
-      setIndexDocType('');
-      loadStats();
-    } catch (e: unknown) {
-      setIndexStatus({ msg: e instanceof Error ? e.message : 'Failed', type: 'error' });
-    }
-  };
-
   return (
     <div>
       {/* Stats */}
       <div className="mb-8">
-        <h2 className="font-heading text-sm font-semibold text-cloud tracking-tight mb-1">Knowledge Base</h2>
+        <h2 className="font-heading text-sm font-semibold text-cloud tracking-tight mb-1">Chat</h2>
         <p className="text-[0.8125rem] text-mid font-light mb-5">
           Query your extracted data using natural language. The system generates SQL, runs it, and explains the results.
         </p>
@@ -124,14 +105,14 @@ export default function KnowledgeBaseTab({ api }: KnowledgeBaseTabProps) {
         ) : (
           <div className="bg-surface border border-border-strong rounded-lg p-5 mb-6">
             <p className="text-[0.8125rem] text-mid">
-              No data indexed yet. Extract documents and index them below, or use the "Index to KB" button on extraction results.
+              No data indexed yet. Extract documents in the Documents tab to get started.
             </p>
           </div>
         )}
       </div>
 
       {/* Chat interface */}
-      <div className="mb-8">
+      <div>
         <h3 className="text-xs font-semibold text-silver uppercase tracking-wide mb-3">Ask Your Data</h3>
 
         <div className="bg-surface border border-border-strong rounded-lg overflow-hidden">
@@ -203,58 +184,20 @@ export default function KnowledgeBaseTab({ api }: KnowledgeBaseTabProps) {
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleQuery(); } }}
               placeholder="Ask a question about your data..."
               disabled={loading || !stats?.exists}
-              className="flex-1 px-3 py-2.5 text-sm bg-deep border border-border-strong rounded-md text-silver placeholder:text-mid/50 outline-none focus:border-coral transition-colors disabled:opacity-40"
+              className="flex-1 px-3 py-2.5 text-sm bg-deep border border-border-strong rounded-md text-silver placeholder:text-mid/50
+                         outline-none focus:border-coral transition-colors disabled:opacity-40"
             />
             <button
               onClick={handleQuery}
               disabled={loading || !input.trim() || !stats?.exists}
-              className="px-5 py-2.5 text-[0.8125rem] font-medium bg-coral text-white rounded-md hover:bg-coral-muted active:translate-y-px transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+              className="px-5 py-2.5 text-[0.8125rem] font-medium bg-coral text-white rounded-md
+                         hover:bg-coral-muted active:translate-y-px transition-all
+                         disabled:opacity-30 disabled:cursor-not-allowed"
             >
               Ask
             </button>
           </div>
         </div>
-      </div>
-
-      {/* Manual index */}
-      <div className="h-px bg-border my-8" />
-
-      <div>
-        <h3 className="text-xs font-semibold text-silver uppercase tracking-wide mb-3">Index Data Manually</h3>
-        <p className="text-[0.8125rem] text-mid font-light mb-4">
-          Paste extracted JSON to add it to your knowledge base.
-        </p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="block text-[0.6875rem] text-mid uppercase tracking-wide mb-1.5">Document Type</label>
-            <input
-              type="text"
-              value={indexDocType}
-              onChange={e => setIndexDocType(e.target.value)}
-              placeholder="e.g., invoice, contract"
-              className="w-full px-3 py-2.5 text-sm bg-surface border border-border-strong rounded-md text-silver placeholder:text-mid/50 outline-none focus:border-coral transition-colors"
-            />
-          </div>
-        </div>
-
-        <label className="block text-[0.6875rem] text-mid uppercase tracking-wide mb-1.5">Extracted JSON</label>
-        <textarea
-          value={indexJson}
-          onChange={e => setIndexJson(e.target.value)}
-          rows={6}
-          placeholder='{"invoice_number": "INV-001", "total": 1500.00, ...}'
-          className="w-full px-3 py-2.5 text-sm font-mono bg-surface border border-border-strong rounded-md text-silver placeholder:text-mid/50 outline-none focus:border-coral transition-colors resize-y mb-4"
-        />
-
-        <button
-          onClick={handleIndex}
-          disabled={!indexJson.trim() || !indexDocType.trim()}
-          className="px-5 py-2 text-[0.8125rem] font-medium bg-coral text-white rounded-md hover:bg-coral-muted active:translate-y-px transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-        >
-          Index Data
-        </button>
-        <StatusMessage message={indexStatus.msg} type={indexStatus.type} />
       </div>
     </div>
   );

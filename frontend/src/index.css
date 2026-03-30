@@ -17,6 +17,7 @@
   --color-surface: #1e1e1e;
   --color-border: rgba(255, 255, 255, 0.06);
   --color-border-strong: rgba(255, 255, 255, 0.1);
+  --color-deep: #121212;
 
   --font-sans: 'IBM Plex Sans', -apple-system, sans-serif;
   --font-heading: 'Montserrat', sans-serif;

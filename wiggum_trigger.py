@@ -31,6 +31,11 @@ class WiggumTriggerError(Exception):
 # Configuration validation
 # ---------------------------------------------------------------------------
 
+def is_github_configured() -> bool:
+    """Check if GitHub PAT and repo are configured."""
+    return bool(GITHUB_PAT and GITHUB_REPO)
+
+
 def validate_config() -> None:
     """Ensure required environment variables are set."""
     if not GITHUB_PAT:

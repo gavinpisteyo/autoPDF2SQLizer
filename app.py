@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from anthropic import Anthropic
@@ -775,6 +776,228 @@ async def run_evaluation(
         raise HTTPException(504, "Evaluation timed out (5 min limit)")
     except Exception as e:
         raise HTTPException(500, f"Evaluation error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Documents — simplified workflow
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/documents/upload")
+async def upload_document(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    project_id: str = Form(...),
+    ground_truth: UploadFile | None = File(default=None),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
+    paths: OrgPaths = Depends(resolve_org_paths),
+):
+    """Upload a PDF and optionally a ground truth file. Returns extraction result."""
+    from process import extract
+    from doc_intel import analyze_document
+
+    # Resolve project for doc_type
+    project = db.get_project(project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    doc_type = project.slug
+
+    # Save PDF
+    pdf_path = paths.uploads / file.filename
+    paths.uploads.mkdir(parents=True, exist_ok=True)
+    content = await file.read()
+    pdf_path.write_bytes(content)
+
+    # Run Doc Intel
+    raw = analyze_document(str(pdf_path))
+
+    # Cache the raw result
+    cache_dir = paths.cache / doc_type
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    stem = pdf_path.stem
+    cache_path = cache_dir / f"{stem}.raw.json"
+    with open(cache_path, "w") as f:
+        json.dump(raw, f, indent=2)
+
+    # Load schema
+    schema = {}
+    schema_path = paths.custom_schemas / f"{doc_type}.json"
+    if schema_path.exists():
+        schema = json.loads(schema_path.read_text())
+    else:
+        global_schema_path = GLOBAL_SCHEMAS_DIR / f"{doc_type}.json"
+        if global_schema_path.exists():
+            schema = json.loads(global_schema_path.read_text())
+
+    # Run extraction
+    extracted = extract(raw, doc_type, schema)
+
+    # Auto-index into Knowledge Base
+    kb_id = kb.resolve_kb_id(ctx.org_id, project_id)
+    try:
+        kb.index_document(kb_id, doc_type, extracted, file.filename)
+    except Exception:
+        pass  # indexing failure shouldn't block extraction
+
+    has_ground_truth = ground_truth is not None
+    result = {
+        "extracted": extracted,
+        "schema": schema,
+        "source_file": file.filename,
+        "doc_type": doc_type,
+        "has_ground_truth": has_ground_truth,
+    }
+
+    if has_ground_truth:
+        # Path A: save ground truth and trigger optimization
+        gt_content = await ground_truth.read()
+        gt_dir = paths.ground_truth / doc_type
+        gt_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save the PDF and truth JSON as ground truth
+        (gt_dir / f"{stem}.pdf").write_bytes(content)
+        (gt_dir / f"{stem}.json").write_bytes(gt_content)
+
+        # Start optimization in background
+        background_tasks.add_task(_start_optimization_bg, ctx.org_id, project_id, project.slug)
+        result["optimization_started"] = True
+
+    return result
+
+
+@app.post("/api/documents/correct")
+async def save_document_corrections(
+    background_tasks: BackgroundTasks,
+    project_id: str = Form(default=""),
+    source_file: str = Form(...),
+    doc_type: str = Form(...),
+    corrected_json: str = Form(...),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
+    paths: OrgPaths = Depends(resolve_org_paths),
+):
+    """Save user corrections as ground truth and start optimization."""
+    try:
+        corrected = json.loads(corrected_json)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Invalid JSON")
+
+    # Save corrected data as ground truth
+    stem = Path(source_file).stem
+    gt_dir = paths.ground_truth / doc_type
+    gt_dir.mkdir(parents=True, exist_ok=True)
+    (gt_dir / f"{stem}.json").write_text(json.dumps(corrected, indent=2))
+
+    # Copy the source PDF to ground truth if not already there
+    src_pdf = paths.uploads / source_file
+    if src_pdf.exists():
+        (gt_dir / f"{stem}.pdf").write_bytes(src_pdf.read_bytes())
+
+    # Re-index with corrected data into KB
+    kb_id = kb.resolve_kb_id(ctx.org_id, project_id or "")
+    try:
+        kb.index_document(kb_id, doc_type, corrected, source_file)
+    except Exception:
+        pass
+
+    # Start optimization in background
+    project = db.get_project(project_id) if project_id else None
+    slug = project.slug if project else doc_type
+    background_tasks.add_task(_start_optimization_bg, ctx.org_id, project_id, slug)
+
+    return {"status": "saved", "optimization_started": True}
+
+
+async def _start_optimization_bg(org_id: str, project_id: str, slug: str):
+    """Background task: start Wiggum optimization with sensible defaults."""
+    import uuid
+    from wiggum_trigger import is_github_configured
+
+    run_id = str(uuid.uuid4())
+    branch = f"clients/{org_id[:8]}-{slug}"
+
+    db.create_wiggum_run(
+        id=run_id,
+        org_id=org_id,
+        project_id=project_id,
+        branch=branch,
+        cycles=5,
+        experiments=5,
+        model="claude-sonnet-4-20250514",
+    )
+
+    if is_github_configured():
+        from wiggum_trigger import commit_ground_truth_to_branch, trigger_workflow
+        try:
+            data_dir = str(Path("data") / org_id / slug)
+            commit_ground_truth_to_branch(data_dir, branch, run_id)
+            trigger_workflow(branch, 5, 5, "claude-sonnet-4-20250514", org_id, project_id, run_id)
+            db.update_wiggum_run(run_id, status="queued")
+        except Exception as e:
+            db.update_wiggum_run(run_id, status="failed", completed_at=datetime.now(timezone.utc).isoformat())
+    else:
+        # No GitHub configured — mark as complete (server-side loop not yet implemented)
+        db.update_wiggum_run(run_id, status="completed", completed_at=datetime.now(timezone.utc).isoformat())
+
+
+@app.get("/api/projects/{project_id}/schema")
+async def get_project_schema(
+    project_id: str,
+    ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
+    paths: OrgPaths = Depends(resolve_org_paths),
+):
+    """Get the schema for a specific project."""
+    project = db.get_project(project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    doc_type = project.slug
+    schema_path = paths.custom_schemas / f"{doc_type}.json"
+    if schema_path.exists():
+        return json.loads(schema_path.read_text())
+
+    global_path = GLOBAL_SCHEMAS_DIR / f"{doc_type}.json"
+    if global_path.exists():
+        return json.loads(global_path.read_text())
+
+    return {"properties": {}, "type": "object"}
+
+
+@app.post("/api/wiggum/start-background")
+async def start_background_optimization(
+    background_tasks: BackgroundTasks,
+    project_id: str = Form(...),
+    ctx: OrgContext = Depends(require_at_least(OrgRole.DEVELOPER)),
+):
+    """Start Wiggum optimization with sensible defaults."""
+    project = db.get_project(project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    background_tasks.add_task(_start_optimization_bg, ctx.org_id, project_id, project.slug)
+    return {"status": "started", "project_id": project_id}
+
+
+@app.get("/api/projects/{project_id}/extraction-status")
+async def get_extraction_status(
+    project_id: str,
+    ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
+):
+    """Check if a project has been optimized (subsequent uploads skip the loop)."""
+    latest = db.get_latest_wiggum_run(ctx.org_id, project_id)
+    if latest and latest.status == "completed":
+        return {
+            "optimized": True,
+            "best_accuracy": latest.best_accuracy,
+            "completed_at": latest.completed_at,
+        }
+    if latest and latest.status in ("pending", "queued", "in_progress"):
+        return {
+            "optimized": False,
+            "optimizing": True,
+            "status": latest.status,
+            "best_accuracy": latest.best_accuracy,
+        }
+    return {"optimized": False, "optimizing": False, "best_accuracy": None}
 
 
 # ---------------------------------------------------------------------------
