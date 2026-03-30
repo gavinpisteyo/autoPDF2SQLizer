@@ -184,17 +184,79 @@ async def debug_upload_with_headers(
     x_org_id: str = Header(default=""),
     x_project_id: str = Header(default=""),
 ):
-    """Debug: test if mixing File+Form+Header causes 500."""
+    """Debug: test full upload flow step by step."""
+    import traceback
+    steps = {}
+
     content = await file.read()
-    return {
-        "file_name": file.filename,
-        "file_size": len(content),
-        "project_id": project_id,
-        "has_gt": ground_truth is not None and ground_truth.filename is not None,
-        "auth_len": len(authorization),
-        "org_id": x_org_id,
-        "project_header": x_project_id,
-    }
+    steps["1_file"] = {"name": file.filename, "size": len(content)}
+
+    # Step 2: Auth
+    try:
+        ctx = await get_org_context(authorization, x_org_id)
+        steps["2_auth"] = {"org_id": ctx.org_id, "role": ctx.role.value, "user": ctx.user.sub}
+    except Exception as e:
+        steps["2_auth"] = {"error": str(e), "type": type(e).__name__}
+        return steps
+
+    # Step 3: Resolve paths
+    try:
+        paths = await resolve_org_paths(authorization, x_org_id, x_project_id)
+        steps["3_paths"] = {"uploads": str(paths.uploads), "schemas": str(paths.custom_schemas)}
+    except Exception as e:
+        steps["3_paths"] = {"error": str(e), "type": type(e).__name__}
+        return steps
+
+    # Step 4: Get project
+    try:
+        project = db.get_project(project_id)
+        steps["4_project"] = {"found": project is not None, "slug": project.slug if project else None}
+    except Exception as e:
+        steps["4_project"] = {"error": str(e)}
+        return steps
+
+    # Step 5: Save file
+    try:
+        pdf_path = paths.uploads / file.filename
+        paths.uploads.mkdir(parents=True, exist_ok=True)
+        pdf_path.write_bytes(content)
+        steps["5_save"] = {"path": str(pdf_path)}
+    except Exception as e:
+        steps["5_save"] = {"error": str(e), "tb": traceback.format_exc()}
+        return steps
+
+    # Step 6: Doc Intel
+    try:
+        from doc_intel import analyze_document
+        raw = analyze_document(str(pdf_path))
+        steps["6_doc_intel"] = {"pages": len(raw.get("pages", []))}
+    except Exception as e:
+        steps["6_doc_intel"] = {"error": str(e)}
+        return steps
+
+    # Step 7: Load schema
+    try:
+        schema = {}
+        if project:
+            sp = paths.custom_schemas / f"{project.slug}.json"
+            if sp.exists():
+                schema = json.loads(sp.read_text())
+        steps["7_schema"] = {"fields": len(schema.get("properties", {}))}
+    except Exception as e:
+        steps["7_schema"] = {"error": str(e)}
+        return steps
+
+    # Step 8: Extract
+    try:
+        from process import extract
+        extracted = extract(raw, project.slug if project else "test", schema)
+        steps["8_extract"] = {"fields": list(extracted.keys())[:10]}
+    except Exception as e:
+        steps["8_extract"] = {"error": str(e), "tb": traceback.format_exc()}
+        return steps
+
+    steps["status"] = "ALL_OK"
+    return steps
 
 
 @app.post("/api/debug/upload-test")
