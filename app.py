@@ -125,6 +125,28 @@ else:
 
 app.include_router(wiggum_router)
 
+
+@app.get("/api/health")
+async def health():
+    """Health check — verifies API keys and services."""
+    checks = {}
+    checks["anthropic_key_set"] = bool(os.getenv("ANTHROPIC_API_KEY"))
+    checks["azure_di_key_set"] = bool(os.getenv("AZURE_DOCUMENT_INTELLIGENCE_KEY"))
+    checks["db_path"] = str(db.DB_PATH)
+    checks["db_exists"] = db.DB_PATH.exists()
+    # Quick Anthropic API test
+    try:
+        resp = llm.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=10,
+            messages=[{"role": "user", "content": "Say ok"}],
+        )
+        checks["anthropic_api"] = "ok"
+    except Exception as e:
+        checks["anthropic_api"] = f"error: {e}"
+    return checks
+
+
 # ---------------------------------------------------------------------------
 # Organizations & Projects
 # ---------------------------------------------------------------------------
