@@ -35,6 +35,7 @@ from auth import (
     require_at_least,
     resolve_org_paths,
 )
+from auth.models import role_at_least
 from doc_intel import analyze_document, cache_result, get_cached_result
 from process import extract
 from sql_gen import generate_create_table, json_to_sql
@@ -678,10 +679,32 @@ async def cache_ground_truth(
 async def generate_schema(
     description: str = Form(...),
     doc_type_key: str = Form(...),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
-    paths: OrgPaths = Depends(resolve_org_paths),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
 ):
     """Generate a JSON Schema from a plain-English description of desired fields."""
+    import traceback
+
+    # Manual auth with full error capture
+    try:
+        ctx = await get_org_context(authorization, x_org_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"generate-schema auth error: {traceback.format_exc()}")
+        raise HTTPException(500, f"Auth error: {e}")
+
+    if not role_at_least(ctx.role, OrgRole.BUSINESS_USER):
+        raise HTTPException(403, f"Requires at least business_user role, you have {ctx.role.value}")
+
+    try:
+        paths = await resolve_org_paths(authorization, x_org_id, x_project_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"generate-schema paths error: {traceback.format_exc()}")
+        raise HTTPException(500, f"Paths error: {e}")
 
     # Business users can generate new schemas but not overwrite existing
     existing_path = paths.custom_schemas / f"{doc_type_key}.json"
