@@ -73,7 +73,9 @@ export default function DocumentsTab({ api, onGoToChat }: DocumentsTabProps) {
         workflow.completeOptimization();
       }
     } catch (e: unknown) {
-      setExtractionStatus({ msg: e instanceof Error ? e.message : 'Extraction failed', type: 'error' });
+      const errMsg = e instanceof Error ? e.message : 'Extraction failed';
+      setExtractionStatus({ msg: `Extraction error: ${errMsg}`, type: 'error' });
+      // Stay on UPLOAD so the error is visible — don't hide it
       workflow.goToUpload();
     }
   };
@@ -154,10 +156,15 @@ export default function DocumentsTab({ api, onGoToChat }: DocumentsTabProps) {
 
       {/* UPLOAD */}
       {workflow.workflowState === 'UPLOAD' && workflow.selectedProject && (
-        <UploadArea
-          onSubmit={handleUploadSubmit}
-          projectName={workflow.selectedProject.name}
-        />
+        <div>
+          {extractionStatus.type === 'error' && (
+            <StatusMessage message={extractionStatus.msg} type={extractionStatus.type} />
+          )}
+          <UploadArea
+            onSubmit={handleUploadSubmit}
+            projectName={workflow.selectedProject.name}
+          />
+        </div>
       )}
 
       {/* EXTRACTING */}

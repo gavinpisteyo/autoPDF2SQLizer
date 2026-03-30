@@ -899,11 +899,12 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     project_id: str = Form(...),
-    ground_truth: UploadFile | None = File(default=None),
+    ground_truth: UploadFile = File(default=None),
     ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
     paths: OrgPaths = Depends(resolve_org_paths),
 ):
     """Upload a PDF and optionally a ground truth file. Returns extraction result."""
+    import traceback
     from process import extract
     from doc_intel import analyze_document
 
@@ -914,21 +915,32 @@ async def upload_document(
     doc_type = project.slug
 
     # Save PDF
-    pdf_path = paths.uploads / file.filename
-    paths.uploads.mkdir(parents=True, exist_ok=True)
-    content = await file.read()
-    pdf_path.write_bytes(content)
+    try:
+        pdf_path = paths.uploads / file.filename
+        paths.uploads.mkdir(parents=True, exist_ok=True)
+        content = await file.read()
+        pdf_path.write_bytes(content)
+    except Exception as e:
+        logger.error(f"PDF save error: {traceback.format_exc()}")
+        raise HTTPException(500, f"Failed to save PDF: {e}")
 
     # Run Doc Intel
-    raw = analyze_document(str(pdf_path))
+    try:
+        raw = analyze_document(str(pdf_path))
+    except Exception as e:
+        logger.error(f"Doc Intel error: {traceback.format_exc()}")
+        raise HTTPException(500, f"Document Intelligence failed: {e}")
 
     # Cache the raw result
-    cache_dir = paths.cache / doc_type
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    stem = pdf_path.stem
-    cache_path = cache_dir / f"{stem}.raw.json"
-    with open(cache_path, "w") as f:
-        json.dump(raw, f, indent=2)
+    try:
+        cache_dir = paths.cache / doc_type
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        stem = pdf_path.stem
+        cache_path = cache_dir / f"{stem}.raw.json"
+        with open(cache_path, "w") as f:
+            json.dump(raw, f, indent=2)
+    except Exception as e:
+        logger.warning(f"Cache write error (non-fatal): {e}")
 
     # Load schema
     schema = {}
@@ -941,7 +953,11 @@ async def upload_document(
             schema = json.loads(global_schema_path.read_text())
 
     # Run extraction
-    extracted = extract(raw, doc_type, schema)
+    try:
+        extracted = extract(raw, doc_type, schema)
+    except Exception as e:
+        logger.error(f"Extraction error: {traceback.format_exc()}")
+        raise HTTPException(500, f"Extraction failed: {e}")
 
     # Auto-index into Knowledge Base
     kb_id = kb.resolve_kb_id(ctx.org_id, project_id)
