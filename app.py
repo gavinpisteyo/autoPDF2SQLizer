@@ -175,6 +175,28 @@ async def debug_auth_test(
     return steps
 
 
+@app.post("/api/debug/upload-with-headers")
+async def debug_upload_with_headers(
+    file: UploadFile = File(...),
+    project_id: str = Form(default="test"),
+    ground_truth: UploadFile = File(default=None),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
+):
+    """Debug: test if mixing File+Form+Header causes 500."""
+    content = await file.read()
+    return {
+        "file_name": file.filename,
+        "file_size": len(content),
+        "project_id": project_id,
+        "has_gt": ground_truth is not None and ground_truth.filename is not None,
+        "auth_len": len(authorization),
+        "org_id": x_org_id,
+        "project_header": x_project_id,
+    }
+
+
 @app.post("/api/debug/upload-test")
 async def debug_upload_test(
     file: UploadFile = File(...),
