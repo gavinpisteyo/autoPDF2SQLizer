@@ -17,6 +17,18 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
     return h;
   }
 
+  async function parseResponse(res: Response) {
+    const text = await res.text();
+    try {
+      const data = JSON.parse(text);
+      if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+      return data;
+    } catch (e) {
+      if (!res.ok) throw new Error(text || `Request failed (${res.status})`);
+      throw e;
+    }
+  }
+
   async function post(path: string, body: FormData | Record<string, unknown>) {
     const isForm = body instanceof FormData;
     const h = await headers();
@@ -26,25 +38,19 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
       headers: h,
       body: isForm ? body : JSON.stringify(body),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Request failed');
-    return data;
+    return parseResponse(res);
   }
 
   async function get(path: string) {
     const h = await headers();
     const res = await fetch(`${BASE}${path}`, { headers: h });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Request failed');
-    return data;
+    return parseResponse(res);
   }
 
   async function del(path: string) {
     const h = await headers();
     const res = await fetch(`${BASE}${path}`, { method: 'DELETE', headers: h });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'Request failed');
-    return data;
+    return parseResponse(res);
   }
 
   // -- Me --

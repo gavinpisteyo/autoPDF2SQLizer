@@ -598,6 +598,7 @@ the item schema properly.
 
 Return ONLY the JSON Schema — no markdown fences, no explanation."""
 
+    text = ""
     try:
         response = llm.messages.create(
             model="claude-sonnet-4-20250514",
@@ -611,10 +612,14 @@ Return ONLY the JSON Schema — no markdown fences, no explanation."""
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
-            schema = json.loads(match.group())
+            try:
+                schema = json.loads(match.group())
+            except json.JSONDecodeError:
+                raise HTTPException(500, "Failed to parse generated schema")
         else:
             raise HTTPException(500, "Failed to parse generated schema")
     except Exception as e:
+        logger.error(f"Schema generation error: {e}")
         raise HTTPException(500, f"Schema generation error: {e}")
 
     # Auto-save as custom schema
