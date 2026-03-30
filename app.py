@@ -93,13 +93,27 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         method = request.method
         path = request.url.path
 
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception as e:
+            duration_ms = (time.time() - start) * 1000
+            logger.error(
+                f"{method} {path} → 500 UNHANDLED "
+                f"({duration_ms:.0f}ms) org={org_id} error={e}"
+            )
+            raise
 
         duration_ms = (time.time() - start) * 1000
-        logger.info(
-            f"{method} {path} → {response.status_code} "
-            f"({duration_ms:.0f}ms) org={org_id}"
-        )
+        if response.status_code >= 400:
+            logger.warning(
+                f"{method} {path} → {response.status_code} "
+                f"({duration_ms:.0f}ms) org={org_id}"
+            )
+        else:
+            logger.info(
+                f"{method} {path} → {response.status_code} "
+                f"({duration_ms:.0f}ms) org={org_id}"
+            )
         return response
 
 
@@ -124,6 +138,27 @@ else:
 
 
 app.include_router(wiggum_router)
+
+
+@app.get("/api/debug/generate-schema-test")
+async def debug_schema_test():
+    """Debug: test schema generation without auth."""
+    import traceback
+    try:
+        response = llm.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=512,
+            temperature=0.0,
+            system="Generate a JSON Schema with type object and properties: year (number), quarter (string). Return ONLY JSON.",
+            messages=[{"role": "user", "content": "year and quarter fields"}],
+        )
+        text = response.content[0].text
+        schema = json.loads(text.strip().strip("`").strip())
+        return {"status": "ok", "schema": schema}
+    except json.JSONDecodeError as e:
+        return {"status": "json_error", "raw_text": text, "error": str(e)}
+    except Exception as e:
+        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
 
 
 @app.get("/api/health")
