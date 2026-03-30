@@ -1012,23 +1012,22 @@ async def upload_document(
     from process import extract
     from doc_intel import analyze_document
 
-    # Manual auth (Depends() can mask errors)
+    # --- TEMPORARY DEBUG: trace every step ---
+    _debug_steps = {}
     try:
         ctx = await get_org_context(authorization, x_org_id)
-    except HTTPException:
-        raise
+        _debug_steps["auth"] = f"ok: {ctx.role.value}"
     except Exception as e:
-        raise HTTPException(500, f"Auth failed: {e}")
+        return JSONResponse({"_debug": True, "steps": _debug_steps, "failed_at": "auth", "error": str(e), "type": type(e).__name__}, status_code=200)
 
     if not role_at_least(ctx.role, OrgRole.BUSINESS_USER):
-        raise HTTPException(403, f"Requires business_user, you have {ctx.role.value}")
+        return JSONResponse({"_debug": True, "failed_at": "role_check", "role": ctx.role.value}, status_code=200)
 
     try:
         paths = await resolve_org_paths(authorization, x_org_id, x_project_id)
-    except HTTPException:
-        raise
+        _debug_steps["paths"] = f"ok: {paths.uploads}"
     except Exception as e:
-        raise HTTPException(500, f"Path resolution failed: {e}")
+        return JSONResponse({"_debug": True, "steps": _debug_steps, "failed_at": "paths", "error": str(e), "type": type(e).__name__, "tb": traceback.format_exc()}, status_code=200)
 
     # Resolve project for doc_type
     project = db.get_project(project_id)
