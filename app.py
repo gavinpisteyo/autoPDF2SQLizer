@@ -999,7 +999,6 @@ async def run_evaluation(
 
 @app.post("/api/documents/upload")
 async def upload_document(
-    request: Request,
     file: UploadFile = File(...),
     project_id: str = Form(...),
     authorization: str = Header(default=""),
@@ -1086,10 +1085,8 @@ async def upload_document(
     except Exception:
         pass  # indexing failure shouldn't block extraction
 
-    # Check for ground truth in the multipart form
-    form = await request.form()
-    gt_file = form.get("ground_truth")
-    has_ground_truth = gt_file is not None and hasattr(gt_file, 'read')
+    # Ground truth handled separately via /api/documents/correct
+    has_ground_truth = False
 
     result = {
         "extracted": extracted,
