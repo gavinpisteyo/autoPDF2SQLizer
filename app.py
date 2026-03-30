@@ -153,7 +153,9 @@ async def debug_schema_test():
             messages=[{"role": "user", "content": "year and quarter fields"}],
         )
         text = response.content[0].text
-        schema = json.loads(text.strip().strip("`").strip())
+        cleaned = re.sub(r"^```\w*\n?", "", text.strip())
+        cleaned = re.sub(r"\n?```$", "", cleaned).strip()
+        schema = json.loads(cleaned)
         return {"status": "ok", "schema": schema}
     except json.JSONDecodeError as e:
         return {"status": "json_error", "raw_text": text, "error": str(e)}
@@ -665,7 +667,10 @@ Return ONLY the JSON Schema — no markdown fences, no explanation."""
             messages=[{"role": "user", "content": description}],
         )
         text = response.content[0].text
-        schema = json.loads(text)
+        # Strip markdown fences if present
+        cleaned = re.sub(r"^```\w*\n?", "", text.strip())
+        cleaned = re.sub(r"\n?```$", "", cleaned).strip()
+        schema = json.loads(cleaned)
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
