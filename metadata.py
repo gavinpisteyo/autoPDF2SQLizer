@@ -13,9 +13,9 @@ from pathlib import Path
 
 def _resolve_db_path() -> Path:
     """Use persistent storage on Azure App Service, local file otherwise."""
-    azure_home = Path("/home")
-    if azure_home.exists():
-        data_dir = azure_home / "data"
+    azure_site = Path("/home/site")
+    if azure_site.exists():
+        data_dir = Path("/home/data")
         data_dir.mkdir(parents=True, exist_ok=True)
         return data_dir / "metadata.db"
     return Path(__file__).parent / "metadata.db"

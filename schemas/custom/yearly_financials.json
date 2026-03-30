@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "properties": {
+    "year": {
+      "type": "number",
+      "description": "The year of the financial data"
+    },
+    "quarter": {
+      "type": "string",
+      "description": "The quarter of the financial data (e.g., Q1, Q2, Q3, Q4)"
+    },
+    "ebitda": {
+      "type": "number",
+      "description": "Earnings Before Interest, Taxes, Depreciation, and Amortization"
+    },
+    "gross_revenue": {
+      "type": "number",
+      "description": "Total revenue before any deductions"
+    },
+    "gross_profit": {
+      "type": "number",
+      "description": "Revenue minus cost of goods sold"
+    }
+  }
+}

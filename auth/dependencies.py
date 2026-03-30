@@ -27,10 +27,10 @@ _jwks_client: PyJWKClient | None = None
 
 BASE_DIR = Path(__file__).parent.parent
 
-# Use persistent storage on Azure App Service (/home/data persists across deploys)
-_azure_home = Path("/home")
-if _azure_home.exists():
-    _azure_data = _azure_home / "data"
+# Use persistent storage on Azure App Service (/home/site only exists on App Service, not macOS)
+_azure_site = Path("/home/site")
+if _azure_site.exists():
+    _azure_data = Path("/home/data")
     _azure_data.mkdir(parents=True, exist_ok=True)
     PERSISTENT_ROOT = _azure_data
 else:

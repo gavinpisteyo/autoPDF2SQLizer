@@ -298,9 +298,9 @@ class MSSQLBackend:
 
 def _persistent_root() -> Path:
     """Use persistent storage on Azure, local otherwise."""
-    azure_home = Path("/home")
-    if azure_home.exists():
-        data_dir = azure_home / "data"
+    azure_site = Path("/home/site")
+    if azure_site.exists():
+        data_dir = Path("/home/data")
         data_dir.mkdir(parents=True, exist_ok=True)
         return data_dir / "knowledge_bases"
     return Path(__file__).parent / "knowledge_bases"
