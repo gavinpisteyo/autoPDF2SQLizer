@@ -405,9 +405,11 @@ async def resolve_join_request(
 
 @app.get("/api/projects")
 async def list_projects(
-    ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ):
     """List projects in the current org. Admins see all; others see assigned only."""
+    ctx = await get_org_context(authorization, x_org_id)
     is_admin = ctx.role == OrgRole.ORG_ADMIN
     return db.list_projects(ctx.org_id, ctx.user.sub, is_admin)
 
@@ -417,9 +419,13 @@ async def create_project(
     name: str = Form(...),
     slug: str = Form(...),
     description: str = Form(""),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.ORG_ADMIN)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ):
     """Create a new project in the current org. Admin only."""
+    ctx = await get_org_context(authorization, x_org_id)
+    if not role_at_least(ctx.role, OrgRole.ORG_ADMIN):
+        raise HTTPException(403, f"Requires org_admin, you have {ctx.role.value}")
     clean_slug = _re.sub(r"[^\w\-]", "-", slug.lower().strip())
     if not clean_slug:
         raise HTTPException(400, "Invalid slug")
@@ -949,13 +955,32 @@ async def upload_document(
     file: UploadFile = File(...),
     project_id: str = Form(...),
     ground_truth: UploadFile = File(default=None),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
-    paths: OrgPaths = Depends(resolve_org_paths),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
 ):
     """Upload a PDF and optionally a ground truth file. Returns extraction result."""
     import traceback
     from process import extract
     from doc_intel import analyze_document
+
+    # Manual auth (Depends() can mask errors)
+    try:
+        ctx = await get_org_context(authorization, x_org_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Auth failed: {e}")
+
+    if not role_at_least(ctx.role, OrgRole.BUSINESS_USER):
+        raise HTTPException(403, f"Requires business_user, you have {ctx.role.value}")
+
+    try:
+        paths = await resolve_org_paths(authorization, x_org_id, x_project_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Path resolution failed: {e}")
 
     # Resolve project for doc_type
     project = db.get_project(project_id)
