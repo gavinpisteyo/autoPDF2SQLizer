@@ -163,6 +163,49 @@ async def debug_schema_test():
         return {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
 
 
+@app.get("/api/debug/auth-test")
+async def debug_auth_test(
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
+):
+    """Debug: trace the full auth flow and report where it fails."""
+    import traceback
+    steps = {}
+
+    # Step 1: get_current_user
+    try:
+        user = await get_current_user(authorization)
+        steps["1_user"] = {"sub": user.sub, "email": user.email, "name": user.name}
+    except Exception as e:
+        steps["1_user"] = {"error": str(e), "tb": traceback.format_exc()}
+        return steps
+
+    # Step 2: get_org_context
+    try:
+        ctx = await get_org_context(authorization, x_org_id)
+        steps["2_org_context"] = {"org_id": ctx.org_id, "role": ctx.role.value}
+    except Exception as e:
+        steps["2_org_context"] = {"error": str(e), "tb": traceback.format_exc()}
+        return steps
+
+    # Step 3: resolve_org_paths
+    try:
+        paths = await resolve_org_paths(authorization, x_org_id, x_project_id)
+        steps["3_paths"] = {
+            "schemas": str(paths.schemas),
+            "custom_schemas": str(paths.custom_schemas),
+            "ground_truth": str(paths.ground_truth),
+            "uploads": str(paths.uploads),
+        }
+    except Exception as e:
+        steps["3_paths"] = {"error": str(e), "tb": traceback.format_exc()}
+        return steps
+
+    steps["status"] = "all_ok"
+    return steps
+
+
 @app.get("/api/health")
 async def health():
     """Health check — verifies API keys and services."""
