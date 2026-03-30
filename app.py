@@ -999,10 +999,9 @@ async def run_evaluation(
 
 @app.post("/api/documents/upload")
 async def upload_document(
-    background_tasks: BackgroundTasks,
+    request: Request,
     file: UploadFile = File(...),
     project_id: str = Form(...),
-    ground_truth: UploadFile = File(default=None),
     authorization: str = Header(default=""),
     x_org_id: str = Header(default=""),
     x_project_id: str = Header(default=""),
@@ -1087,7 +1086,11 @@ async def upload_document(
     except Exception:
         pass  # indexing failure shouldn't block extraction
 
-    has_ground_truth = ground_truth is not None
+    # Check for ground truth in the multipart form
+    form = await request.form()
+    gt_file = form.get("ground_truth")
+    has_ground_truth = gt_file is not None and hasattr(gt_file, 'read')
+
     result = {
         "extracted": extracted,
         "schema": schema,
@@ -1098,16 +1101,16 @@ async def upload_document(
 
     if has_ground_truth:
         # Path A: save ground truth and trigger optimization
-        gt_content = await ground_truth.read()
+        gt_content = await gt_file.read()
         gt_dir = paths.ground_truth / doc_type
         gt_dir.mkdir(parents=True, exist_ok=True)
-
-        # Save the PDF and truth JSON as ground truth
         (gt_dir / f"{stem}.pdf").write_bytes(content)
         (gt_dir / f"{stem}.json").write_bytes(gt_content)
-
-        # Start optimization in background
-        background_tasks.add_task(_start_optimization_bg, ctx.org_id, project_id, project.slug)
+        # Fire-and-forget optimization
+        import asyncio
+        asyncio.get_event_loop().call_soon(
+            lambda: asyncio.ensure_future(_start_optimization_bg(ctx.org_id, project_id, project.slug))
+        )
         result["optimization_started"] = True
 
     return result
