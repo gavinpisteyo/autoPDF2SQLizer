@@ -9,6 +9,7 @@ Usage:
 
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -20,9 +21,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -163,13 +164,42 @@ async def get_me(
 
 @app.post("/api/orgs")
 async def create_org(
+    background_tasks: BackgroundTasks,
     name: str = Form(...),
     authorization: str = Header(default=""),
 ):
     """Create a new organization. The creator becomes admin."""
+    from db_provisioner import is_azure_sql_configured, provision_database
+
     user = await get_current_user(authorization)
     org = db.create_org(name, user.sub, user.email, user.name)
-    return org.to_dict()
+
+    result = org.to_dict()
+    if is_azure_sql_configured():
+        # Create a placeholder record and provision in the background
+        db.create_org_database(
+            org_id=org.id,
+            database_name="pending",
+            server=os.getenv("AZURE_SQL_SERVER", ""),
+            username="pending",
+            password="pending",
+            port=int(os.getenv("AZURE_SQL_PORT", "1433")),
+        )
+        background_tasks.add_task(_provision_org_db, org.id)
+        result["db_status"] = "provisioning"
+    else:
+        result["db_status"] = "sqlite"
+
+    return result
+
+
+def _provision_org_db(org_id: str) -> None:
+    """Background task: provision an Azure SQL Database for an org."""
+    from db_provisioner import provision_database
+    try:
+        provision_database(org_id)
+    except Exception as exc:
+        logger.error("Background DB provisioning failed for org %s: %s", org_id, exc)
 
 
 @app.get("/api/me/orgs")
@@ -290,6 +320,48 @@ async def remove_project_member(
     """Remove a member from a project. Admin only."""
     db.remove_project_member(project_id, user_sub)
     return {"status": "removed"}
+
+
+# ---------------------------------------------------------------------------
+# Org Database provisioning status
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/orgs/{org_id}/db-status")
+async def get_org_db_status(
+    org_id: str,
+    ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
+):
+    """Return the provisioning status of the org's database."""
+    if ctx.org_id != org_id:
+        raise HTTPException(403, "Cannot view another org's database status")
+    org_db = db.get_org_database(org_id)
+    if not org_db:
+        return {"status": "sqlite", "message": "Using local SQLite storage"}
+    return org_db.to_dict()
+
+
+@app.post("/api/orgs/{org_id}/db-reprovision")
+async def reprovision_org_db(
+    org_id: str,
+    background_tasks: BackgroundTasks,
+    ctx: OrgContext = Depends(require_at_least(OrgRole.ORG_ADMIN)),
+):
+    """Retry provisioning for a failed org database. Admin only."""
+    if ctx.org_id != org_id:
+        raise HTTPException(403, "Cannot reprovision another org's database")
+
+    org_db = db.get_org_database(org_id)
+    if not org_db:
+        raise HTTPException(404, "No database record found for this org")
+    if org_db.status == "ready":
+        raise HTTPException(409, "Database is already provisioned and ready")
+    if org_db.status == "provisioning":
+        raise HTTPException(409, "Database provisioning is already in progress")
+
+    db.update_org_database_status(org_id, status="provisioning", error=None)
+    background_tasks.add_task(_provision_org_db, org_id)
+    return {"status": "provisioning", "message": "Re-provisioning started"}
 
 
 # ---------------------------------------------------------------------------
@@ -712,12 +784,24 @@ async def run_evaluation(
 import knowledge_base as kb
 
 
+def _check_kb_ready(org_id: str) -> None:
+    """Raise 503 if the org's database is still being provisioned."""
+    org_db = db.get_org_database(org_id)
+    if org_db and org_db.status == "provisioning":
+        raise HTTPException(
+            status_code=503,
+            detail="Database is still being provisioned. Please retry shortly.",
+            headers={"Retry-After": "10"},
+        )
+
+
 @app.get("/api/kb/stats")
 async def kb_stats(
     ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
     x_project_id: str = Header(default=""),
 ):
     """Get knowledge base stats for the current org/project."""
+    _check_kb_ready(ctx.org_id)
     kb_id = kb.resolve_kb_id(ctx.org_id, x_project_id)
     return kb.get_stats(kb_id)
 
@@ -728,6 +812,7 @@ async def kb_schema(
     x_project_id: str = Header(default=""),
 ):
     """Get schema description for the knowledge base."""
+    _check_kb_ready(ctx.org_id)
     kb_id = kb.resolve_kb_id(ctx.org_id, x_project_id)
     return {"schema": kb.get_schema_description(kb_id)}
 
@@ -741,6 +826,7 @@ async def kb_index(
     x_project_id: str = Header(default=""),
 ):
     """Index extracted data into the knowledge base."""
+    _check_kb_ready(ctx.org_id)
     kb_id = kb.resolve_kb_id(ctx.org_id, x_project_id)
     try:
         data = json.loads(extracted_json)
@@ -762,6 +848,7 @@ async def kb_query(
     x_project_id: str = Header(default=""),
 ):
     """Ask a natural language question about the knowledge base."""
+    _check_kb_ready(ctx.org_id)
     kb_id = kb.resolve_kb_id(ctx.org_id, x_project_id)
     result = kb.query(kb_id, question)
     return {

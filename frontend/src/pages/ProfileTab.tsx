@@ -22,6 +22,53 @@ interface JoinReq {
   requested_at: string;
 }
 
+function DbStatusCard({ api, orgId }: { api: ApiClient; orgId: string }) {
+  const [status, setStatus] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    if (!orgId) return;
+    api.getDbStatus(orgId).then(setStatus).catch(() => {});
+  }, [api, orgId]);
+
+  if (!status) return null;
+
+  const s = status.status as string;
+  const badge = s === 'ready'
+    ? 'bg-sage-bg text-sage'
+    : s === 'provisioning'
+    ? 'bg-coral/15 text-coral'
+    : s === 'failed'
+    ? 'bg-red-500/15 text-red-400'
+    : 'bg-white/[0.06] text-mid';
+
+  return (
+    <div className="mt-6">
+      <div className="bg-surface border border-border rounded-lg p-5">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-medium text-cloud">Database</h3>
+          <span className={`text-[0.6875rem] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-sm ${badge}`}>
+            {s === 'sqlite_fallback' ? 'Local (SQLite)' : s}
+          </span>
+        </div>
+        {s === 'ready' && (
+          <p className="text-xs text-mid">
+            Azure SQL Database <span className="text-silver font-mono">{status.database_name as string}</span> is active.
+          </p>
+        )}
+        {s === 'provisioning' && (
+          <p className="text-xs text-mid">Database is being provisioned. This usually takes 10-30 seconds.</p>
+        )}
+        {s === 'failed' && (
+          <p className="text-xs text-red-400">Provisioning failed: {status.error as string}</p>
+        )}
+        {s === 'sqlite_fallback' && (
+          <p className="text-xs text-mid">Azure SQL is not configured. Using local SQLite for development.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const ROLE_LABELS: Record<string, { label: string; desc: string }> = {
   org_admin: { label: 'Admin', desc: 'Full access — manage org, projects, execute SQL, all features' },
   developer: { label: 'Developer', desc: 'Ground truth, evaluation, DB connections, extraction' },
@@ -173,6 +220,9 @@ export default function ProfileTab({ api }: ProfileTabProps) {
           {joinMsg && <p className="text-xs text-sage mt-2">{joinMsg}</p>}
         </div>
       </div>
+
+      {/* Database Status (admin only) */}
+      {isAdmin && <DbStatusCard api={api} orgId={orgId || ''} />}
 
       <div className="h-px bg-border my-10" />
 

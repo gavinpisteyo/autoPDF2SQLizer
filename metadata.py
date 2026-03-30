@@ -101,6 +101,20 @@ def init_db():
             FOREIGN KEY (org_id) REFERENCES orgs(id),
             FOREIGN KEY (project_id) REFERENCES projects(id)
         );
+
+        CREATE TABLE IF NOT EXISTS org_databases (
+            org_id TEXT PRIMARY KEY,
+            database_name TEXT NOT NULL,
+            server TEXT NOT NULL,
+            username TEXT NOT NULL,
+            password_encrypted TEXT NOT NULL,
+            port INTEGER DEFAULT 1433,
+            status TEXT DEFAULT 'provisioning',
+            created_at TEXT NOT NULL,
+            ready_at TEXT,
+            error TEXT,
+            FOREIGN KEY (org_id) REFERENCES orgs(id)
+        );
     """)
     conn.commit()
     conn.close()
@@ -113,6 +127,26 @@ init_db()
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
+
+@dataclass
+class OrgDatabase:
+    org_id: str
+    database_name: str
+    server: str
+    username: str
+    password_encrypted: str
+    port: int
+    status: str
+    created_at: str
+    ready_at: str | None
+    error: str | None
+
+    def to_dict(self) -> dict:
+        """Return a safe dict — never includes password."""
+        d = asdict(self)
+        d.pop("password_encrypted", None)
+        return d
+
 
 @dataclass
 class Project:
@@ -412,6 +446,93 @@ def add_org_member(org_id: str, user_sub: str, role: str = "viewer",
     conn.execute(
         "INSERT OR REPLACE INTO org_members (org_id, user_sub, user_email, user_name, role, joined_at) VALUES (?, ?, ?, ?, ?, ?)",
         (org_id, user_sub, user_email, user_name, role, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Org Databases (per-customer Azure SQL)
+# ---------------------------------------------------------------------------
+
+def create_org_database(
+    org_id: str,
+    database_name: str,
+    server: str,
+    username: str,
+    password: str,
+    port: int = 1433,
+) -> OrgDatabase:
+    """Create an org_databases record for a newly provisioned database."""
+    conn = _get_conn()
+    now = datetime.now(timezone.utc).isoformat()
+
+    conn.execute(
+        "INSERT INTO org_databases "
+        "(org_id, database_name, server, username, password_encrypted, port, status, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'provisioning', ?)",
+        (org_id, database_name, server, username, password, port, now),
+    )
+    conn.commit()
+    conn.close()
+
+    return OrgDatabase(
+        org_id=org_id,
+        database_name=database_name,
+        server=server,
+        username=username,
+        password_encrypted=password,
+        port=port,
+        status="provisioning",
+        created_at=now,
+        ready_at=None,
+        error=None,
+    )
+
+
+def get_org_database(org_id: str) -> OrgDatabase | None:
+    """Get the database record for an org."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM org_databases WHERE org_id = ?", (org_id,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return OrgDatabase(**dict(row))
+
+
+def update_org_database_status(
+    org_id: str,
+    status: str,
+    error: str | None = None,
+    ready_at: str | None = None,
+) -> None:
+    """Update the provisioning status of an org's database."""
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE org_databases SET status = ?, error = ?, ready_at = ? WHERE org_id = ?",
+        (status, error, ready_at, org_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_org_database_credentials(
+    org_id: str,
+    database_name: str,
+    server: str,
+    username: str,
+    password: str,
+    port: int,
+) -> None:
+    """Update the actual connection details after provisioning completes."""
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE org_databases "
+        "SET database_name = ?, server = ?, username = ?, password_encrypted = ?, port = ? "
+        "WHERE org_id = ?",
+        (database_name, server, username, password, port, org_id),
     )
     conn.commit()
     conn.close()

@@ -132,6 +132,7 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
   }
 
   const listMyOrgs = () => get('/me/orgs');
+  const getDbStatus = (orgId: string) => get(`/orgs/${orgId}/db-status`);
 
   async function requestJoinOrg(targetOrgId: string) {
     const fd = new FormData();
@@ -206,7 +207,7 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
     runEvaluation,
     generateSql, executeSql, testConnection,
     generateSchema,
-    createOrg, listMyOrgs, requestJoinOrg, listJoinRequests, resolveJoinRequest,
+    createOrg, listMyOrgs, getDbStatus, requestJoinOrg, listJoinRequests, resolveJoinRequest,
     listProjects, createProject, getProject, addProjectMember, removeProjectMember,
     startWiggum, getWiggumStatus, getWiggumHistory,
     kbStats, kbSchema, kbIndex, kbQuery,
