@@ -67,17 +67,8 @@ SCHEMAS_DIR = BASE_DIR / "schemas"
 
 app = FastAPI(title="autoPDF2SQLizer", version="0.1.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:8000",
-        "https://autopdf2sqlizer.azurewebsites.net",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# NOTE: CORS middleware is added AFTER RequestLoggingMiddleware below
+# so that CORS runs first (Starlette processes last-added middleware first)
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +77,7 @@ app.add_middleware(
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if not request.url.path.startswith("/api/"):
+        if not request.url.path.startswith("/api/") or request.method == "OPTIONS":
             return await call_next(request)
 
         start = time.time()
@@ -119,6 +110,19 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(RequestLoggingMiddleware)
+
+# CORS must be added AFTER logging middleware so it runs first (outermost)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "https://autopdf2sqlizer.azurewebsites.net",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Serve React build if available, fall back to legacy static/
 STATIC_BUILD_DIR = BASE_DIR / "static-build"
