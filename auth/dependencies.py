@@ -220,8 +220,7 @@ def require_role(*allowed_roles: OrgRole) -> Callable:
         authorization: str = Header(default=""),
         x_org_id: str = Header(default=""),
     ) -> OrgContext:
-        user = await get_current_user(authorization)
-        ctx = await get_org_context(user, x_org_id)
+        ctx = await get_org_context(authorization, x_org_id)
 
         if ctx.role not in allowed_roles:
             raise HTTPException(
@@ -247,8 +246,7 @@ def require_at_least(minimum_role: OrgRole) -> Callable:
         authorization: str = Header(default=""),
         x_org_id: str = Header(default=""),
     ) -> OrgContext:
-        user = await get_current_user(authorization)
-        ctx = await get_org_context(user, x_org_id)
+        ctx = await get_org_context(authorization, x_org_id)
 
         if not role_at_least(ctx.role, minimum_role):
             raise HTTPException(
