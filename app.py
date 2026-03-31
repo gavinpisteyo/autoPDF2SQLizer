@@ -1012,17 +1012,16 @@ async def save_document_corrections(
     except Exception:
         pass
 
-    # Start optimization in background (fire and forget)
+    # Start optimization
     project = db.get_project(project_id) if project_id else None
     slug = project.slug if project else doc_type
-    import asyncio
-    asyncio.ensure_future(_start_optimization_bg(ctx.org_id, project_id, slug))
+    run_id = await _start_optimization_bg(ctx.org_id, project_id, slug)
 
-    return {"status": "saved", "optimization_started": True}
+    return {"status": "saved", "optimization_started": True, "run_id": run_id}
 
 
-async def _start_optimization_bg(org_id: str, project_id: str, slug: str):
-    """Background task: start Wiggum optimization with sensible defaults."""
+async def _start_optimization_bg(org_id: str, project_id: str, slug: str) -> str:
+    """Create a Wiggum optimization run. Returns run_id."""
     import uuid
     from wiggum_trigger import is_github_configured
 
@@ -1046,11 +1045,13 @@ async def _start_optimization_bg(org_id: str, project_id: str, slug: str):
             commit_ground_truth_to_branch(data_dir, branch, run_id)
             trigger_workflow(branch, 5, 5, "claude-sonnet-4-20250514", org_id, project_id, run_id)
             db.update_wiggum_run(run_id, status="queued")
-        except Exception as e:
+        except Exception:
             db.update_wiggum_run(run_id, status="failed", completed_at=datetime.now(timezone.utc).isoformat())
     else:
-        # No GitHub configured — mark as complete (server-side loop not yet implemented)
+        # No GitHub configured — mark as complete immediately
         db.update_wiggum_run(run_id, status="completed", completed_at=datetime.now(timezone.utc).isoformat())
+
+    return run_id
 
 
 @app.get("/api/projects/{project_id}/schema")
@@ -1080,7 +1081,6 @@ async def get_project_schema(
 
 @app.post("/api/wiggum/start-background")
 async def start_background_optimization(
-    background_tasks: BackgroundTasks,
     project_id: str = Form(...),
     authorization: str = Header(default=""),
     x_org_id: str = Header(default=""),
@@ -1093,8 +1093,8 @@ async def start_background_optimization(
     if not project:
         raise HTTPException(404, "Project not found")
 
-    background_tasks.add_task(_start_optimization_bg, ctx.org_id, project_id, project.slug)
-    return {"status": "started", "project_id": project_id}
+    run_id = await _start_optimization_bg(ctx.org_id, project_id, project.slug)
+    return {"status": "started", "project_id": project_id, "run_id": run_id}
 
 
 @app.get("/api/projects/{project_id}/extraction-status")

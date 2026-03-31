@@ -11,7 +11,7 @@ interface SchemaGeneratorProps {
 export default function SchemaGenerator({ api, projectName, onSchemaGenerated }: SchemaGeneratorProps) {
   const [description, setDescription] = useState('');
   const [docTypeKey, setDocTypeKey] = useState(
-    projectName.toLowerCase().replace(/[^\w]+/g, '_').replace(/^_|_$/g, ''),
+    projectName.toLowerCase().replace(/[^\w]+/g, '-').replace(/^-|-$/g, ''),
   );
   const [generating, setGenerating] = useState(false);
   const [generatedSchema, setGeneratedSchema] = useState<Record<string, unknown> | null>(null);
@@ -51,12 +51,12 @@ export default function SchemaGenerator({ api, projectName, onSchemaGenerated }:
       // Parse the preview in case user edited it
       const finalSchema = schemaPreview ? JSON.parse(schemaPreview) as Record<string, unknown> : generatedSchema;
 
-      // Create the project
-      const slug = projectName.toLowerCase().replace(/[^\w]+/g, '-').replace(/^-|-$/g, '');
+      // Create the project — slug matches docTypeKey
+      const slug = docTypeKey;
       const project = await api.createProject(projectName, slug, '');
 
-      // Save the schema
-      await api.saveSchema(docTypeKey, finalSchema);
+      // Save the schema using the same key as the slug
+      await api.saveSchema(slug, finalSchema);
 
       setStatus({ msg: 'Project created and schema saved.', type: 'success' });
       onSchemaGenerated(docTypeKey, finalSchema, project.id as string);
