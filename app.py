@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,7 +39,6 @@ from auth import (
 from auth.models import role_at_least
 from doc_intel import analyze_document, cache_result, get_cached_result
 from process import extract
-from sql_gen import generate_create_table, json_to_sql
 from wiggum_routes import router as wiggum_router
 
 llm = Anthropic()
@@ -61,6 +61,11 @@ logger = logging.getLogger("autopdf2sqlizer")
 BASE_DIR = Path(__file__).parent
 SCHEMAS_DIR = BASE_DIR / "schemas"
 GLOBAL_SCHEMAS_DIR = SCHEMAS_DIR  # alias used in some endpoints
+
+
+def _safe_slug(value: str) -> str:
+    """Sanitize a value for use in file paths."""
+    return re.sub(r"[^\w\-]", "-", value.lower().strip())
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +151,8 @@ async def health():
         )
         checks["anthropic_api"] = "ok"
     except Exception as e:
-        checks["anthropic_api"] = f"error: {e}"
+        logger.warning("Anthropic API health check failed: %s", e)
+        checks["anthropic_api"] = "error"
     return checks
 
 
@@ -392,8 +398,7 @@ async def delete_project(
         raise HTTPException(400, f"Confirmation failed. Type '{project.name}' to delete.")
 
     # Delete project data directory
-    import shutil
-    data_dir = Path("data") / ctx.org_id / project.slug
+    data_dir = BASE_DIR / "data" / ctx.org_id / project.slug
     if data_dir.exists():
         shutil.rmtree(data_dir, ignore_errors=True)
 
@@ -405,7 +410,7 @@ async def delete_project(
             shutil.rmtree(persistent_dir, ignore_errors=True)
 
     # Delete schema file
-    schema_path = Path("schemas/custom") / f"{project.slug}.json"
+    schema_path = BASE_DIR / "schemas" / "custom" / f"{project.slug}.json"
     if schema_path.exists():
         schema_path.unlink()
 
@@ -492,12 +497,13 @@ async def get_schema(
 ):
     """Get a specific schema by document type."""
     _ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.VIEWER)
+    safe_doc_type = _safe_slug(doc_type)
     for parent in [SCHEMAS_DIR, paths.custom_schemas]:
-        path = parent / f"{doc_type}.json"
+        path = parent / f"{safe_doc_type}.json"
         if path.exists():
             with open(path) as f:
                 return json.load(f)
-    raise HTTPException(404, f"Schema not found: {doc_type}")
+    raise HTTPException(404, f"Schema not found: {safe_doc_type}")
 
 
 @app.post("/api/schemas/{doc_type}")
@@ -510,7 +516,8 @@ async def save_custom_schema(
 ):
     """Save a custom schema. Business users can create new; only dev+ can overwrite."""
     ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.BUSINESS_USER)
-    path = paths.custom_schemas / f"{doc_type}.json"
+    safe_doc_type = _safe_slug(doc_type)
+    path = paths.custom_schemas / f"{safe_doc_type}.json"
 
     # Business users can create new schemas but not overwrite existing ones
     if path.exists() and ctx.role == OrgRole.BUSINESS_USER:
@@ -538,7 +545,9 @@ async def extract_pdf(
     """Upload a PDF, run Doc Intel + extraction, return structured data."""
     ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.BUSINESS_USER)
 
-    upload_path = paths.uploads / file.filename
+    safe_name = Path(file.filename).name  # strips path components like ../../
+    safe_doc_type = _safe_slug(doc_type)
+    upload_path = paths.uploads / safe_name
     with open(upload_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
@@ -546,30 +555,33 @@ async def extract_pdf(
     if custom_schema:
         schema = json.loads(custom_schema)
     else:
-        schema_path = SCHEMAS_DIR / f"{doc_type}.json"
+        schema_path = SCHEMAS_DIR / f"{safe_doc_type}.json"
         if not schema_path.exists():
-            schema_path = paths.custom_schemas / f"{doc_type}.json"
+            schema_path = paths.custom_schemas / f"{safe_doc_type}.json"
         if not schema_path.exists():
-            raise HTTPException(404, f"No schema for type: {doc_type}")
+            raise HTTPException(404, f"No schema for type: {safe_doc_type}")
         with open(schema_path) as f:
             schema = json.load(f)
 
     # Run Azure Document Intelligence
     try:
         raw = analyze_document(str(upload_path))
-    except EnvironmentError as e:
-        raise HTTPException(500, str(e))
-    except Exception as e:
-        raise HTTPException(500, f"Document Intelligence error: {e}")
+    except EnvironmentError:
+        logger.error("Document Intelligence env error for file %s", safe_name, exc_info=True)
+        raise HTTPException(500, "Document processing failed. Check server logs.")
+    except Exception:
+        logger.error("Document Intelligence error for file %s", safe_name, exc_info=True)
+        raise HTTPException(500, "Document processing failed. Check server logs.")
 
     # Cache the raw result (org-scoped)
-    cache_result(doc_type, upload_path.stem, raw, base_dir=paths.cache)
+    cache_result(safe_doc_type, upload_path.stem, raw, base_dir=paths.cache)
 
     # Run extraction
     try:
-        result = extract(raw, doc_type, schema)
-    except Exception as e:
-        raise HTTPException(500, f"Extraction error: {e}")
+        result = extract(raw, safe_doc_type, schema)
+    except Exception:
+        logger.error("Extraction error for file %s", safe_name, exc_info=True)
+        raise HTTPException(500, "Extraction failed. Check server logs.")
 
     # Save result
     result_path = paths.results / f"{upload_path.stem}.json"
@@ -579,8 +591,8 @@ async def extract_pdf(
     return {
         "extracted": result,
         "schema": schema,
-        "source_file": file.filename,
-        "doc_type": doc_type,
+        "source_file": safe_name,
+        "doc_type": safe_doc_type,
     }
 
 
@@ -624,10 +636,12 @@ async def upload_ground_truth(
 ):
     """Upload a ground truth document (PDF + known-correct JSON)."""
     ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.BUSINESS_USER)
-    type_dir = paths.ground_truth / doc_type
+    safe_doc_type = _safe_slug(doc_type)
+    type_dir = paths.ground_truth / safe_doc_type
     type_dir.mkdir(parents=True, exist_ok=True)
 
-    stem = Path(pdf.filename).stem
+    safe_pdf_name = Path(pdf.filename).name  # strips path components like ../../
+    stem = Path(safe_pdf_name).stem
 
     pdf_path = type_dir / f"{stem}.pdf"
     with open(pdf_path, "wb") as f:
@@ -644,7 +658,7 @@ async def upload_ground_truth(
 
     return {
         "status": "uploaded",
-        "doc_type": doc_type,
+        "doc_type": safe_doc_type,
         "name": stem,
         "pdf_path": str(pdf_path),
         "truth_path": str(truth_path),
@@ -677,7 +691,8 @@ async def cache_ground_truth(
                 cache_result(doc_type, name, raw, base_dir=paths.cache)
                 results.append({"name": name, "doc_type": doc_type, "status": "cached"})
             except Exception as e:
-                results.append({"name": name, "doc_type": doc_type, "status": f"error: {e}"})
+                logger.error("Cache error for %s/%s: %s", doc_type, name, e, exc_info=True)
+                results.append({"name": name, "doc_type": doc_type, "status": "error"})
     return results
 
 
@@ -697,7 +712,8 @@ async def generate_schema(
     ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.BUSINESS_USER)
 
     # Business users can generate new schemas but not overwrite existing
-    existing_path = paths.custom_schemas / f"{doc_type_key}.json"
+    safe_key = _safe_slug(doc_type_key)
+    existing_path = paths.custom_schemas / f"{safe_key}.json"
     if existing_path.exists() and ctx.role == OrgRole.BUSINESS_USER:
         raise HTTPException(403, "Business users cannot overwrite existing schemas")
 
@@ -753,16 +769,16 @@ Return ONLY the JSON Schema — no markdown fences, no explanation."""
         else:
             raise HTTPException(500, "Failed to parse generated schema")
     except Exception as e:
-        logger.error(f"Schema generation error: {e}")
-        raise HTTPException(500, f"Schema generation error: {e}")
+        logger.error("Schema generation error: %s", e, exc_info=True)
+        raise HTTPException(500, "Schema generation failed. Check server logs.")
 
     # Auto-save as custom schema
     paths.custom_schemas.mkdir(parents=True, exist_ok=True)
-    path = paths.custom_schemas / f"{doc_type_key}.json"
+    path = paths.custom_schemas / f"{safe_key}.json"
     with open(path, "w") as f:
         json.dump(schema, f, indent=2)
 
-    return {"schema": schema, "doc_type": doc_type_key, "saved_to": str(path)}
+    return {"schema": schema, "doc_type": safe_key, "saved_to": str(path)}
 
 
 # ---------------------------------------------------------------------------
@@ -785,13 +801,15 @@ async def save_as_ground_truth(
     except json.JSONDecodeError:
         raise HTTPException(400, "corrected_json must be valid JSON")
 
-    source_path = paths.uploads / source_file
+    safe_source = Path(source_file).name  # strips path components
+    source_path = paths.uploads / safe_source
     if not source_path.exists():
-        raise HTTPException(404, f"Source PDF not found in uploads: {source_file}")
+        raise HTTPException(404, "Source PDF not found in uploads")
 
     stem = source_path.stem
 
-    type_dir = paths.ground_truth / doc_type
+    safe_doc_type = _safe_slug(doc_type)
+    type_dir = paths.ground_truth / safe_doc_type
     type_dir.mkdir(parents=True, exist_ok=True)
 
     gt_pdf_path = type_dir / f"{stem}.pdf"
@@ -803,104 +821,11 @@ async def save_as_ground_truth(
 
     return {
         "status": "saved",
-        "doc_type": doc_type,
+        "doc_type": safe_doc_type,
         "name": stem,
         "pdf_path": str(gt_pdf_path),
         "truth_path": str(gt_json_path),
     }
-
-
-# ---------------------------------------------------------------------------
-# SQL Generation & Database Upload
-# ---------------------------------------------------------------------------
-
-@app.post("/api/generate-sql")
-async def api_generate_sql(
-    extracted_json: str = Form(...),
-    table_name: str = Form(...),
-    dialect: str = Form("mssql"),
-    schema_name: str = Form("dbo"),
-    include_ddl: bool = Form(False),
-    authorization: str = Header(default=""),
-    x_org_id: str = Header(default=""),
-):
-    """Generate SQL INSERT (and optionally CREATE TABLE) from extracted JSON."""
-    ctx = await get_org_context(authorization, x_org_id)
-    if not role_at_least(ctx.role, OrgRole.BUSINESS_USER):
-        raise HTTPException(403, f"Requires {OrgRole.BUSINESS_USER.value}, you have {ctx.role.value}")
-    try:
-        data = json.loads(extracted_json)
-    except json.JSONDecodeError:
-        raise HTTPException(400, "Invalid JSON")
-
-    sql_parts = []
-    if include_ddl:
-        sql_parts.append(generate_create_table(data, table_name, dialect, schema_name))
-        sql_parts.append("")
-    sql_parts.append(json_to_sql(data, table_name, dialect, schema_name))
-
-    return {"sql": "\n".join(sql_parts), "dialect": dialect, "table_name": table_name}
-
-
-@app.post("/api/execute-sql")
-async def api_execute_sql(
-    sql: str = Form(...),
-    connection_string: str = Form(...),
-    authorization: str = Header(default=""),
-    x_org_id: str = Header(default=""),
-):
-    """Execute SQL against a database. Org admin only."""
-    ctx = await get_org_context(authorization, x_org_id)
-    if not role_at_least(ctx.role, OrgRole.ORG_ADMIN):
-        raise HTTPException(403, f"Requires {OrgRole.ORG_ADMIN.value}, you have {ctx.role.value}")
-    from sqlalchemy import create_engine, text
-
-    try:
-        engine = create_engine(connection_string, connect_args={"timeout": 30})
-    except Exception as e:
-        raise HTTPException(400, f"Invalid connection string: {e}")
-
-    results = []
-    statements = [s.strip() for s in sql.split(";") if s.strip()]
-
-    try:
-        with engine.connect() as conn:
-            for stmt in statements:
-                try:
-                    conn.execute(text(stmt))
-                    results.append({"statement": stmt[:80] + "..." if len(stmt) > 80 else stmt, "status": "ok"})
-                except Exception as e:
-                    results.append({"statement": stmt[:80] + "..." if len(stmt) > 80 else stmt, "status": f"error: {e}"})
-            conn.commit()
-    except Exception as e:
-        raise HTTPException(500, f"Database connection error: {e}")
-    finally:
-        engine.dispose()
-
-    succeeded = sum(1 for r in results if r["status"] == "ok")
-    return {"results": results, "succeeded": succeeded, "total": len(results)}
-
-
-@app.post("/api/test-connection")
-async def api_test_connection(
-    connection_string: str = Form(...),
-    authorization: str = Header(default=""),
-    x_org_id: str = Header(default=""),
-):
-    """Test a database connection."""
-    ctx = await get_org_context(authorization, x_org_id)
-    if not role_at_least(ctx.role, OrgRole.DEVELOPER):
-        raise HTTPException(403, f"Requires {OrgRole.DEVELOPER.value}, you have {ctx.role.value}")
-    from sqlalchemy import create_engine, text
-
-    try:
-        engine = create_engine(connection_string, connect_args={"timeout": 10})
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        engine.dispose()
-        return {"status": "ok", "message": "Connection successful"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
 
 
 # ---------------------------------------------------------------------------
@@ -932,7 +857,8 @@ async def run_evaluation(
     except subprocess.TimeoutExpired:
         raise HTTPException(504, "Evaluation timed out (5 min limit)")
     except Exception as e:
-        raise HTTPException(500, f"Evaluation error: {e}")
+        logger.error("Evaluation error: %s", e, exc_info=True)
+        raise HTTPException(500, "Evaluation failed. Check server logs.")
 
 
 # ---------------------------------------------------------------------------
@@ -956,23 +882,24 @@ async def upload_document(
     if not project:
         raise HTTPException(404, "Project not found")
     doc_type = project.slug
+    safe_name = Path(file.filename).name  # strips path components like ../../
 
     # Save PDF
     try:
-        pdf_path = paths.uploads / file.filename
+        pdf_path = paths.uploads / safe_name
         paths.uploads.mkdir(parents=True, exist_ok=True)
         content = await file.read()
         pdf_path.write_bytes(content)
     except Exception as e:
         logger.error("PDF save error: %s", e, exc_info=True)
-        raise HTTPException(500, f"Failed to save PDF: {e}")
+        raise HTTPException(500, "Failed to save PDF. Check server logs.")
 
     # Run Doc Intel
     try:
         raw = analyze_document(str(pdf_path))
     except Exception as e:
         logger.error("Doc Intel error: %s", e, exc_info=True)
-        raise HTTPException(500, f"Document Intelligence failed: {e}")
+        raise HTTPException(500, "Document Intelligence failed. Check server logs.")
 
     # Cache the raw result
     try:
@@ -1000,19 +927,19 @@ async def upload_document(
         extracted = extract(raw, doc_type, schema)
     except Exception as e:
         logger.error("Extraction error: %s", e, exc_info=True)
-        raise HTTPException(500, f"Extraction failed: {e}")
+        raise HTTPException(500, "Extraction failed. Check server logs.")
 
     # Auto-index into Knowledge Base
     kb_id = kb.resolve_kb_id(ctx.org_id, project_id)
     try:
-        kb.index_document(kb_id, doc_type, extracted, file.filename)
-    except Exception:
-        pass  # indexing failure shouldn't block extraction
+        kb.index_document(kb_id, doc_type, extracted, safe_name)
+    except Exception as e:
+        logger.warning("KB indexing failed: %s", e)
 
     return {
         "extracted": extracted,
         "schema": schema,
-        "source_file": file.filename,
+        "source_file": safe_name,
         "doc_type": doc_type,
         "has_ground_truth": False,
     }
@@ -1036,22 +963,24 @@ async def save_document_corrections(
         raise HTTPException(400, "Invalid JSON")
 
     # Save corrected data as ground truth
-    stem = Path(source_file).stem
-    gt_dir = paths.ground_truth / doc_type
+    safe_source = Path(source_file).name  # strips path components
+    safe_doc_type = _safe_slug(doc_type)
+    stem = Path(safe_source).stem
+    gt_dir = paths.ground_truth / safe_doc_type
     gt_dir.mkdir(parents=True, exist_ok=True)
     (gt_dir / f"{stem}.json").write_text(json.dumps(corrected, indent=2))
 
     # Copy the source PDF to ground truth if not already there
-    src_pdf = paths.uploads / source_file
+    src_pdf = paths.uploads / safe_source
     if src_pdf.exists():
         (gt_dir / f"{stem}.pdf").write_bytes(src_pdf.read_bytes())
 
     # Re-index with corrected data into KB
     kb_id = kb.resolve_kb_id(ctx.org_id, project_id or "")
     try:
-        kb.index_document(kb_id, doc_type, corrected, source_file)
-    except Exception:
-        pass
+        kb.index_document(kb_id, safe_doc_type, corrected, safe_source)
+    except Exception as e:
+        logger.warning("KB indexing failed: %s", e)
 
     # Start optimization
     project = db.get_project(project_id) if project_id else None
@@ -1063,7 +992,7 @@ async def save_document_corrections(
 
 async def _start_optimization_bg(org_id: str, project_id: str, slug: str) -> str:
     """Create a Wiggum optimization run. Returns run_id."""
-    import uuid
+    import asyncio
     from wiggum_trigger import is_github_configured
 
     run_id = str(uuid.uuid4())
@@ -1082,11 +1011,13 @@ async def _start_optimization_bg(org_id: str, project_id: str, slug: str) -> str
     if is_github_configured():
         from wiggum_trigger import commit_ground_truth_to_branch, trigger_workflow
         try:
-            data_dir = str(Path("data") / org_id / slug)
-            commit_ground_truth_to_branch(data_dir, branch, run_id)
-            trigger_workflow(branch, 5, 5, "claude-sonnet-4-20250514", org_id, project_id, run_id)
+            data_dir = str(BASE_DIR / "data" / org_id / slug)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, lambda: commit_ground_truth_to_branch(data_dir, branch, run_id))
+            await loop.run_in_executor(None, lambda: trigger_workflow(branch, 5, 5, "claude-sonnet-4-20250514", org_id, project_id, run_id))
             db.update_wiggum_run(run_id, status="queued")
-        except Exception:
+        except Exception as e:
+            logger.error("Wiggum optimization failed for run %s: %s", run_id, e, exc_info=True)
             db.update_wiggum_run(run_id, status="failed", completed_at=datetime.now(timezone.utc).isoformat())
     else:
         # No GitHub configured — mark as complete immediately

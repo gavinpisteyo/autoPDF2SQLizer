@@ -615,7 +615,7 @@ def update_wiggum_run(id: str, **kwargs) -> None:
         raise ValueError(f"Cannot update fields: {invalid}")
 
     conn = _get_conn()
-    set_clauses = ", ".join(f"{k} = ?" for k in kwargs)
+    set_clauses = ", ".join(f'"{k}" = ?' for k in kwargs)
     values = list(kwargs.values()) + [id]
 
     conn.execute(

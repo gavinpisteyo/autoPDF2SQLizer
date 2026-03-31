@@ -14,6 +14,17 @@ from pathlib import Path
 from typing import Any, Protocol
 
 
+def _validate_select_only(sql: str) -> None:
+    """Reject any SQL that isn't a SELECT statement."""
+    stripped = sql.strip().upper()
+    if not stripped.startswith("SELECT"):
+        raise ValueError("Only SELECT queries are allowed")
+    dangerous = {"DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "CREATE", "EXEC", "TRUNCATE"}
+    for kw in dangerous:
+        if kw in stripped:
+            raise ValueError(f"Dangerous keyword '{kw}' not allowed in queries")
+
+
 # ---------------------------------------------------------------------------
 # Protocol (structural typing — no inheritance required)
 # ---------------------------------------------------------------------------
@@ -128,7 +139,8 @@ class SQLiteBackend:
         return row["c"]
 
     def execute_query(self, sql: str) -> list[dict]:
-        """Execute arbitrary SQL and return results as dicts."""
+        """Execute a SELECT query and return results as dicts."""
+        _validate_select_only(sql)
         rows = self._conn.execute(sql).fetchall()
         return [dict(r) for r in rows]
 
@@ -271,7 +283,8 @@ class MSSQLBackend:
         return cursor.fetchone()[0]
 
     def execute_query(self, sql: str) -> list[dict]:
-        """Execute arbitrary SQL and return results as dicts."""
+        """Execute a SELECT query and return results as dicts."""
+        _validate_select_only(sql)
         cursor = self._conn.cursor(as_dict=True)
         cursor.execute(sql)
         return [dict(r) for r in cursor.fetchall()]

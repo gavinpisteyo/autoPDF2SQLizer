@@ -122,7 +122,8 @@ def _clone_and_checkout(tmp_dir: str, branch: str) -> None:
                 text=True,
             )
         except subprocess.CalledProcessError as e:
-            raise WiggumTriggerError(f"Failed to checkout branch '{branch}': {e.stderr}") from e
+            stderr = (e.stderr or "").replace(GITHUB_PAT, "***") if GITHUB_PAT else (e.stderr or "")
+            raise WiggumTriggerError(f"Failed to checkout branch '{branch}': {stderr}") from e
     else:
         logger.info("Branch '%s' does not exist remotely, creating from main", branch)
         try:
@@ -134,7 +135,8 @@ def _clone_and_checkout(tmp_dir: str, branch: str) -> None:
                 text=True,
             )
         except subprocess.CalledProcessError as e:
-            raise WiggumTriggerError(f"Failed to create branch '{branch}': {e.stderr}") from e
+            stderr = (e.stderr or "").replace(GITHUB_PAT, "***") if GITHUB_PAT else (e.stderr or "")
+            raise WiggumTriggerError(f"Failed to create branch '{branch}': {stderr}") from e
 
 
 def _copy_data_to_repo(data_path: Path, tmp_dir: str) -> None:
