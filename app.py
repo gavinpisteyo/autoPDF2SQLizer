@@ -372,10 +372,10 @@ async def remove_project_member(
     return {"status": "removed"}
 
 
-@app.delete("/api/projects/{project_id}")
+@app.post("/api/projects/{project_id}/delete")
 async def delete_project(
     project_id: str,
-    x_confirm_name: str = Header(default=""),
+    confirm_name: str = Form(...),
     authorization: str = Header(default=""),
     x_org_id: str = Header(default=""),
 ):
@@ -388,7 +388,7 @@ async def delete_project(
     if not project or project.org_id != ctx.org_id:
         raise HTTPException(404, "Project not found")
 
-    if x_confirm_name.strip().lower() != project.name.strip().lower():
+    if confirm_name.strip().lower() != project.name.strip().lower():
         raise HTTPException(400, f"Confirmation failed. Type '{project.name}' to delete.")
 
     # Delete project data directory

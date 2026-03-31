@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useAuthContext } from '../lib/auth';
 import { useDocumentWorkflow } from '../hooks/useDocumentWorkflow';
 import type { ProjectInfo } from '../hooks/useDocumentWorkflow';
 import ProjectSelector from '../components/ProjectSelector';
@@ -17,6 +18,7 @@ interface DocumentsTabProps {
 type SchemaProps = Record<string, { type?: string; [k: string]: unknown }>;
 
 export default function DocumentsTab({ api, onGoToChat }: DocumentsTabProps) {
+  const { setProjectId } = useAuthContext();
   const workflow = useDocumentWorkflow();
   const [status, setStatus] = useState<{ msg: string; type: 'success' | 'error' | 'loading' | null }>({ msg: '', type: null });
   const [saving, setSaving] = useState(false);
@@ -55,10 +57,12 @@ export default function DocumentsTab({ api, onGoToChat }: DocumentsTabProps) {
 
   const handleProjectSelected = (project: ProjectInfo) => {
     workflow.selectProject(project);
+    if (project.id) setProjectId(project.id);
   };
 
   const handleSchemaGenerated = (docTypeKey: string, schemaObj: Record<string, unknown>, projectId: string) => {
     workflow.setSchemaGenerated(docTypeKey, schemaObj, projectId);
+    if (projectId) setProjectId(projectId);
     const props = (schemaObj as { properties?: SchemaProps }).properties;
     if (props) setSchema(props);
   };
@@ -124,7 +128,7 @@ export default function DocumentsTab({ api, onGoToChat }: DocumentsTabProps) {
     <div>
       {/* Back button */}
       {workflow.workflowState !== 'SELECT_PROJECT' && (
-        <button onClick={workflow.reset} className="mb-5 text-[0.8125rem] text-mid hover:text-silver transition-colors">
+        <button onClick={() => { workflow.reset(); setProjectId(''); }} className="mb-5 text-[0.8125rem] text-mid hover:text-silver transition-colors">
           &larr; Back to projects
         </button>
       )}

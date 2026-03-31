@@ -178,10 +178,9 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
     del(`/projects/${projectId}/members/${userSub}`);
 
   async function deleteProject(projectId: string, confirmName: string) {
-    const h = await headers();
-    h['X-Confirm-Name'] = confirmName;
-    const res = await fetch(`${BASE}/projects/${projectId}`, { method: 'DELETE', headers: h });
-    return parseResponse(res);
+    const fd = new FormData();
+    fd.append('confirm_name', confirmName);
+    return post(`/projects/${projectId}/delete`, fd);
   }
 
   // -- Documents --
