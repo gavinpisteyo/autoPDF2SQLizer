@@ -41,7 +41,7 @@ export interface WorkflowActions {
   setGroundTruthFile: (file: File | null) => void;
   setHasExample: (has: boolean) => void;
   startExtraction: () => void;
-  setExtractionResults: (results: Record<string, unknown>, sourceFile: string) => void;
+  setExtractionResults: (results: Record<string, unknown>, sourceFile: string, docType?: string) => void;
   startOptimization: (runId: string) => void;
   completeOptimization: () => void;
   uploadAnother: () => void;
@@ -71,6 +71,7 @@ export function useDocumentWorkflow() {
       ...prev,
       workflowState: nextState,
       selectedProject: project,
+      docTypeKey: project.slug,
     }));
   }, []);
 
@@ -114,12 +115,13 @@ export function useDocumentWorkflow() {
     setData(prev => ({ ...prev, workflowState: 'EXTRACTING' }));
   }, []);
 
-  const setExtractionResults = useCallback((results: Record<string, unknown>, sourceFile: string) => {
+  const setExtractionResults = useCallback((results: Record<string, unknown>, sourceFile: string, docType?: string) => {
     setData(prev => ({
       ...prev,
       workflowState: 'REVIEW_RESULTS',
       extractionResults: results,
       sourceFile,
+      docTypeKey: docType || prev.docTypeKey,
     }));
   }, []);
 

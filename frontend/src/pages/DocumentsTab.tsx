@@ -60,25 +60,33 @@ export default function DocumentsTab({ api, onGoToChat }: DocumentsTabProps) {
 
     try {
       const data = await api.uploadDocument(workflow.selectedProject.id, pdfFile, groundTruthFile);
+      const docType = (data.doc_type as string) || workflow.docTypeKey;
 
+      // Always load schema from response (ensures table shows all schema fields)
       if (data.schema?.properties) {
         setSchemaProperties(data.schema.properties as SchemaProperties);
+      } else if (Object.keys(schemaProperties).length === 0) {
+        // Fallback: fetch schema from project if not in response
+        try {
+          const schemaData = await api.getProjectSchema(workflow.selectedProject.id);
+          if (schemaData?.properties) {
+            setSchemaProperties(schemaData.properties as SchemaProperties);
+          }
+        } catch {}
       }
 
       if (data.extracted) {
         const extracted = data.extracted as Record<string, unknown>;
-        // Check if any fields were actually populated
         const populatedFields = Object.entries(extracted).filter(([, v]) => v !== null && v !== '' && v !== undefined);
 
+        workflow.setExtractionResults(extracted, data.source_file as string || '', docType);
+
         if (populatedFields.length === 0) {
-          // No fields extracted — show helpful message instead of blank table
           setExtractionStatus({
-            msg: 'The document was processed but no matching fields were found. This can happen if the document layout doesn\'t match the schema. Try uploading a different document or adjusting your schema description.',
+            msg: 'No matching values found in the document, but your schema fields are shown below. Fill them in manually.',
             type: 'error',
           });
-          workflow.setExtractionResults(extracted, data.source_file as string || '');
         } else {
-          workflow.setExtractionResults(extracted, data.source_file as string || '');
           setExtractionStatus({ msg: `Extraction complete — ${populatedFields.length} field(s) found. Review and correct below.`, type: 'success' });
         }
       } else {
