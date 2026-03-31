@@ -267,6 +267,15 @@ def get_project_by_slug(org_id: str, slug: str) -> Project | None:
     return Project(**dict(row))
 
 
+def delete_project(project_id: str) -> None:
+    """Delete a project and all its members."""
+    conn = _get_conn()
+    conn.execute("DELETE FROM project_members WHERE project_id = ?", (project_id,))
+    conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    conn.commit()
+    conn.close()
+
+
 def is_project_member(project_id: str, user_sub: str) -> bool:
     conn = _get_conn()
     row = conn.execute(

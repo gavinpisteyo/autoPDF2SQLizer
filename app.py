@@ -372,6 +372,47 @@ async def remove_project_member(
     return {"status": "removed"}
 
 
+@app.delete("/api/projects/{project_id}")
+async def delete_project(
+    project_id: str,
+    x_confirm_name: str = Header(default=""),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+):
+    """Delete a project. Requires typing the project name to confirm. Admin only."""
+    ctx = await get_org_context(authorization, x_org_id)
+    if not role_at_least(ctx.role, OrgRole.ORG_ADMIN):
+        raise HTTPException(403, f"Requires {OrgRole.ORG_ADMIN.value}, you have {ctx.role.value}")
+
+    project = db.get_project(project_id)
+    if not project or project.org_id != ctx.org_id:
+        raise HTTPException(404, "Project not found")
+
+    if x_confirm_name.strip().lower() != project.name.strip().lower():
+        raise HTTPException(400, f"Confirmation failed. Type '{project.name}' to delete.")
+
+    # Delete project data directory
+    import shutil
+    data_dir = Path("data") / ctx.org_id / project.slug
+    if data_dir.exists():
+        shutil.rmtree(data_dir, ignore_errors=True)
+
+    # Delete from persistent storage too
+    azure_site = Path("/home/site")
+    if azure_site.exists():
+        persistent_dir = Path("/home/data/data") / ctx.org_id / project.slug
+        if persistent_dir.exists():
+            shutil.rmtree(persistent_dir, ignore_errors=True)
+
+    # Delete schema file
+    schema_path = Path("schemas/custom") / f"{project.slug}.json"
+    if schema_path.exists():
+        schema_path.unlink()
+
+    db.delete_project(project_id)
+    return {"status": "deleted", "name": project.name}
+
+
 # ---------------------------------------------------------------------------
 # Org Database provisioning status
 # ---------------------------------------------------------------------------

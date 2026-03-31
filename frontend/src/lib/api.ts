@@ -177,6 +177,13 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
   const removeProjectMember = (projectId: string, userSub: string) =>
     del(`/projects/${projectId}/members/${userSub}`);
 
+  async function deleteProject(projectId: string, confirmName: string) {
+    const h = await headers();
+    h['X-Confirm-Name'] = confirmName;
+    const res = await fetch(`${BASE}/projects/${projectId}`, { method: 'DELETE', headers: h });
+    return parseResponse(res);
+  }
+
   // -- Documents --
   async function uploadDocument(projectId: string, pdfFile: File, groundTruthFile?: File) {
     const fd = new FormData();
@@ -242,7 +249,7 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
     generateSql, executeSql, testConnection,
     generateSchema,
     createOrg, listMyOrgs, getDbStatus, requestJoinOrg, listJoinRequests, resolveJoinRequest,
-    listProjects, createProject, getProject, addProjectMember, removeProjectMember,
+    listProjects, createProject, getProject, addProjectMember, removeProjectMember, deleteProject,
     uploadDocument, saveCorrections, getProjectSchema, startBackgroundOptimization, getExtractionStatus,
     startWiggum, getWiggumStatus, getWiggumHistory,
     kbStats, kbSchema, kbIndex, kbQuery,
