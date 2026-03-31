@@ -116,6 +116,28 @@ def init_db():
             error TEXT,
             FOREIGN KEY (org_id) REFERENCES orgs(id)
         );
+
+        CREATE TABLE IF NOT EXISTS project_extraction_code (
+            project_id TEXT PRIMARY KEY,
+            prompt TEXT NOT NULL DEFAULT '',
+            processing_code TEXT NOT NULL DEFAULT '',
+            accuracy REAL DEFAULT 0.0,
+            version INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS project_extraction_versions (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            prompt TEXT NOT NULL DEFAULT '',
+            processing_code TEXT NOT NULL DEFAULT '',
+            accuracy REAL DEFAULT 0.0,
+            version INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id)
+        );
     """)
     conn.commit()
     conn.close()

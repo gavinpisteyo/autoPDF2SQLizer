@@ -922,12 +922,33 @@ async def upload_document(
         if global_schema_path.exists():
             schema = json.loads(global_schema_path.read_text())
 
-    # Run extraction
-    try:
-        extracted = extract(raw, doc_type, schema)
-    except Exception as e:
-        logger.error("Extraction error: %s", e, exc_info=True)
-        raise HTTPException(500, "Extraction failed. Check server logs.")
+    # Check for optimized extraction code (skips LLM call if available)
+    import extraction_code_db as _code_db
+    from sandbox import SandboxExecutionError as _SandboxExecErr, execute_extraction as _exec_extraction
+
+    stored_code = _code_db.get_extraction_code(project_id)
+    if stored_code and stored_code.accuracy > 0:
+        try:
+            extracted = _exec_extraction(
+                stored_code.processing_code, stored_code.prompt, raw, schema,
+            )
+        except _SandboxExecErr:
+            logger.warning(
+                "Optimized extraction failed for project %s, falling back to generic",
+                project_id,
+            )
+            try:
+                extracted = extract(raw, doc_type, schema)
+            except Exception as e:
+                logger.error("Extraction error: %s", e, exc_info=True)
+                raise HTTPException(500, "Extraction failed. Check server logs.")
+    else:
+        # No optimized code -- use generic LLM extraction
+        try:
+            extracted = extract(raw, doc_type, schema)
+        except Exception as e:
+            logger.error("Extraction error: %s", e, exc_info=True)
+            raise HTTPException(500, "Extraction failed. Check server logs.")
 
     # Auto-index into Knowledge Base
     kb_id = kb.resolve_kb_id(ctx.org_id, project_id)
@@ -991,9 +1012,15 @@ async def save_document_corrections(
 
 
 async def _start_optimization_bg(org_id: str, project_id: str, slug: str) -> str:
-    """Create a Wiggum optimization run. Returns run_id."""
+    """Create a Wiggum optimization run and launch the loop in a background thread.
+
+    The loop is a blocking function that updates the DB as it progresses.
+    We fire it off with run_in_executor (WITHOUT await) so this returns
+    immediately with the run_id.
+    """
     import asyncio
-    from wiggum_trigger import is_github_configured
+
+    from wiggum_loop import run_loop
 
     run_id = str(uuid.uuid4())
     branch = f"clients/{org_id[:8]}-{slug}"
@@ -1008,24 +1035,10 @@ async def _start_optimization_bg(org_id: str, project_id: str, slug: str) -> str
         model="claude-sonnet-4-20250514",
     )
 
-    if is_github_configured():
-        from wiggum_trigger import commit_ground_truth_to_branch, trigger_workflow
-        try:
-            # Use persistent path on Azure
-            from auth.dependencies import PERSISTENT_ROOT
-            data_dir = str(PERSISTENT_ROOT / "data" / org_id / slug)
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, lambda: commit_ground_truth_to_branch(data_dir, branch, run_id))
-            await loop.run_in_executor(None, lambda: trigger_workflow(branch, 5, 5, "claude-sonnet-4-20250514", org_id, project_id, run_id))
-            db.update_wiggum_run(run_id, status="queued")
-        except Exception as e:
-            # Git operations failed — log it but mark as completed so the user isn't blocked.
-            # Ground truth is already saved locally. The Wiggum loop can be re-triggered later.
-            logger.warning("Wiggum git operations failed for run %s (non-fatal): %s", run_id, e)
-            db.update_wiggum_run(run_id, status="completed", completed_at=datetime.now(timezone.utc).isoformat())
-    else:
-        # No GitHub configured — mark as complete immediately
-        db.update_wiggum_run(run_id, status="completed", completed_at=datetime.now(timezone.utc).isoformat())
+    # Fire-and-forget: run_loop is blocking, so push it to a thread pool.
+    # Deliberately NOT awaited — the frontend polls /api/wiggum/status.
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, lambda: run_loop(org_id, project_id, run_id))
 
     return run_id
 

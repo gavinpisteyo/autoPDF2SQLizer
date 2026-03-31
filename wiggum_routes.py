@@ -1,26 +1,25 @@
 """
-Wiggum Routes — FastAPI endpoints for triggering and monitoring Wiggum optimization runs.
-"""
+Wiggum Routes -- FastAPI endpoints for triggering and monitoring Wiggum optimization runs.
 
+The loop now runs server-side (wiggum_loop.py) in a background thread.
+The frontend polls /api/wiggum/status which reads directly from the DB.
+"""
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Form, Header, HTTPException
 
 from auth import OrgContext, OrgRole, get_org_context
+from auth.dependencies import DATA_DIR
 from auth.models import role_at_least
 import metadata as db
-import wiggum_trigger as trigger
 
 logger = logging.getLogger("autopdf2sqlizer.wiggum_routes")
-
-BASE_DIR = Path(__file__).parent
-DATA_DIR = BASE_DIR / "data"
 
 router = APIRouter(prefix="/api/wiggum", tags=["wiggum"])
 
@@ -47,23 +46,18 @@ def _resolve_project(ctx: OrgContext, x_project_id: str) -> db.Project | None:
 
 
 def _build_branch_name(org_name: str, project_slug: str) -> str:
-    """Generate a git branch name from org name + project slug."""
+    """Generate a branch-style label from org name + project slug."""
     clean_org = re.sub(r"[^\w\-]", "-", org_name.lower().strip())
     return f"clients/{clean_org}-{project_slug}"
 
 
-def _build_data_dir(org_id: str, project_slug: str) -> str:
-    """Build the path to the org/project data directory."""
-    return str(DATA_DIR / org_id / project_slug)
-
-
-def _has_ground_truth(data_dir: str) -> bool:
-    """Check that ground truth data exists in the data directory."""
-    gt_path = Path(data_dir) / "ground_truth"
+def _has_ground_truth(org_id: str, project_slug: str) -> bool:
+    """Check that ground truth JSON files exist in the project data directory."""
+    gt_path = DATA_DIR / org_id / project_slug / "ground_truth"
     if not gt_path.exists():
         return False
-    # At least one PDF must exist
-    return any(gt_path.rglob("*.pdf"))
+    # At least one ground truth JSON must exist
+    return any(gt_path.rglob("*.json"))
 
 
 # ---------------------------------------------------------------------------
@@ -79,16 +73,12 @@ async def start_wiggum(
     x_org_id: str = Header(default=""),
     x_project_id: str = Header(default=""),
 ):
-    """Start a Wiggum optimization run."""
+    """Start a Wiggum optimization run (server-side loop)."""
+    from wiggum_loop import run_loop
+
     ctx = await get_org_context(authorization, x_org_id)
     if not role_at_least(ctx.role, OrgRole.DEVELOPER):
         raise HTTPException(403, f"Requires {OrgRole.DEVELOPER.value}, you have {ctx.role.value}")
-
-    # Validate GitHub configuration
-    try:
-        trigger.validate_config()
-    except trigger.WiggumTriggerError as e:
-        raise HTTPException(503, f"Wiggum is not configured: {e}")
 
     # Resolve project
     project = _resolve_project(ctx, x_project_id)
@@ -104,18 +94,17 @@ async def start_wiggum(
         )
 
     # Validate ground truth exists
-    data_dir = _build_data_dir(ctx.org_id, project.slug)
-    if not _has_ground_truth(data_dir):
+    if not _has_ground_truth(ctx.org_id, project.slug):
         raise HTTPException(
             400,
-            "No ground truth data found. Upload ground truth PDFs before starting Wiggum.",
+            "No ground truth data found. Upload and correct documents before starting Wiggum.",
         )
 
     # Resolve org name for branch naming
     org = db.get_org(ctx.org_id)
     org_name = org.name if org else ctx.org_id
 
-    # Generate branch and run ID
+    # Generate branch label and run ID
     branch = _build_branch_name(org_name, project.slug)
     run_id = str(uuid.uuid4())
 
@@ -130,35 +119,21 @@ async def start_wiggum(
         model=model,
     )
 
-    # Commit ground truth to branch
-    try:
-        trigger.commit_ground_truth_to_branch(data_dir, branch, run_id)
-    except trigger.WiggumTriggerError as e:
-        db.update_wiggum_run(run_id, status="failed")
-        logger.error("Failed to commit ground truth for run %s: %s", run_id, e)
-        raise HTTPException(500, f"Failed to push ground truth: {e}")
-
-    # Trigger the GitHub Actions workflow
-    try:
-        trigger.trigger_workflow(
-            branch=branch,
-            cycles=cycles,
-            experiments=experiments,
+    # Fire-and-forget: launch the blocking loop in a background thread.
+    # Deliberately NOT awaited -- the frontend polls /api/wiggum/status.
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(
+        None,
+        lambda: run_loop(
+            ctx.org_id, project.id, run_id,
+            max_iterations=cycles * experiments,
             model=model,
-            org_id=ctx.org_id,
-            project_id=project.id,
-            run_id=run_id,
-        )
-    except trigger.WiggumTriggerError as e:
-        db.update_wiggum_run(run_id, status="failed")
-        logger.error("Failed to trigger workflow for run %s: %s", run_id, e)
-        raise HTTPException(500, f"Failed to trigger workflow: {e}")
-
-    db.update_wiggum_run(run_id, status="queued")
+        ),
+    )
 
     return {
         "run_id": run.id,
-        "status": "queued",
+        "status": "pending",
         "branch": branch,
     }
 
@@ -170,7 +145,11 @@ async def get_wiggum_status(
     x_org_id: str = Header(default=""),
     x_project_id: str = Header(default=""),
 ):
-    """Get latest Wiggum run status for current org+project."""
+    """Get latest Wiggum run status for current org+project.
+
+    The server-side loop updates the DB directly as it runs,
+    so this endpoint simply reads the latest state.
+    """
     ctx = await get_org_context(authorization, x_org_id)
 
     # Accept project_id from query param OR header
@@ -181,39 +160,6 @@ async def get_wiggum_status(
 
     if not latest:
         return {"status": "none", "message": "No Wiggum runs found for this project"}
-
-    # If the run is active and we have a github_run_id, poll GitHub for updated status
-    if latest.status in ACTIVE_STATUSES and latest.github_run_id:
-        try:
-            gh_status = trigger.get_workflow_run_status(latest.github_run_id)
-            updated_status = _map_github_status(gh_status)
-
-            updates: dict = {"status": updated_status}
-            if updated_status not in ACTIVE_STATUSES:
-                updates["completed_at"] = datetime.now(timezone.utc).isoformat()
-
-            db.update_wiggum_run(latest.id, **updates)
-
-            return {
-                **latest.to_dict(),
-                "status": updated_status,
-                "github_status": gh_status,
-            }
-        except trigger.WiggumTriggerError:
-            # If we can't reach GitHub, return the last known state
-            pass
-
-    # If active but no github_run_id yet, try to find it
-    if latest.status in ACTIVE_STATUSES and not latest.github_run_id:
-        try:
-            github_run_id = trigger.find_triggered_run(
-                latest.branch, latest.id, latest.started_at,
-            )
-            if github_run_id:
-                db.update_wiggum_run(latest.id, github_run_id=github_run_id)
-                return {**latest.to_dict(), "github_run_id": github_run_id}
-        except trigger.WiggumTriggerError:
-            pass
 
     return latest.to_dict()
 
@@ -232,26 +178,3 @@ async def get_wiggum_history(
     runs = db.list_wiggum_runs(ctx.org_id, project_id)
 
     return runs
-
-
-# ---------------------------------------------------------------------------
-# Status mapping
-# ---------------------------------------------------------------------------
-
-def _map_github_status(gh_status: dict) -> str:
-    """Map GitHub Actions status/conclusion to our internal status."""
-    status = gh_status.get("status", "")
-    conclusion = gh_status.get("conclusion")
-
-    if status == "completed":
-        if conclusion == "success":
-            return "completed"
-        return "failed"
-
-    if status in ("queued", "waiting", "pending"):
-        return "queued"
-
-    if status == "in_progress":
-        return "in_progress"
-
-    return status or "unknown"
