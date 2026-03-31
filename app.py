@@ -22,9 +22,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 # BaseHTTPMiddleware removed — it breaks file uploads by consuming the request body
 
@@ -32,7 +32,7 @@ from auth import (
     OrgContext,
     OrgPaths,
     OrgRole,
-    require_at_least,
+    get_org_context,
     resolve_org_paths,
 )
 from auth.models import role_at_least
@@ -60,6 +60,26 @@ logger = logging.getLogger("autopdf2sqlizer")
 
 BASE_DIR = Path(__file__).parent
 SCHEMAS_DIR = BASE_DIR / "schemas"
+GLOBAL_SCHEMAS_DIR = SCHEMAS_DIR  # alias used in some endpoints
+
+
+# ---------------------------------------------------------------------------
+# Auth helper — replaces all Depends(require_at_least / resolve_org_paths)
+# ---------------------------------------------------------------------------
+
+async def _get_auth(
+    authorization: str,
+    x_org_id: str,
+    x_project_id: str = "",
+    min_role: OrgRole = OrgRole.VIEWER,
+) -> tuple[OrgContext, OrgPaths]:
+    """Simple auth + paths helper. No Depends() magic."""
+    ctx = await get_org_context(authorization, x_org_id)
+    if not role_at_least(ctx.role, min_role):
+        raise HTTPException(403, f"Requires {min_role.value}, you have {ctx.role.value}")
+    paths = await resolve_org_paths(authorization, x_org_id, x_project_id)
+    return ctx, paths
+
 
 # ---------------------------------------------------------------------------
 # App
@@ -109,201 +129,6 @@ else:
 app.include_router(wiggum_router)
 
 
-@app.get("/api/debug/generate-schema-test")
-async def debug_schema_test():
-    """Debug: test schema generation without auth."""
-    import traceback
-    try:
-        response = llm.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=512,
-            temperature=0.0,
-            system="Generate a JSON Schema with type object and properties: year (number), quarter (string). Return ONLY JSON.",
-            messages=[{"role": "user", "content": "year and quarter fields"}],
-        )
-        text = response.content[0].text
-        cleaned = re.sub(r"^```\w*\n?", "", text.strip())
-        cleaned = re.sub(r"\n?```$", "", cleaned).strip()
-        schema = json.loads(cleaned)
-        return {"status": "ok", "schema": schema}
-    except json.JSONDecodeError as e:
-        return {"status": "json_error", "raw_text": text, "error": str(e)}
-    except Exception as e:
-        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
-
-
-@app.get("/api/debug/auth-test")
-async def debug_auth_test(
-    authorization: str = Header(default=""),
-    x_org_id: str = Header(default=""),
-    x_project_id: str = Header(default=""),
-):
-    """Debug: trace the full auth flow and report where it fails."""
-    import traceback
-    steps = {}
-
-    # Step 1: get_current_user
-    try:
-        user = await get_current_user(authorization)
-        steps["1_user"] = {"sub": user.sub, "email": user.email, "name": user.name}
-    except Exception as e:
-        steps["1_user"] = {"error": str(e), "tb": traceback.format_exc()}
-        return steps
-
-    # Step 2: get_org_context
-    try:
-        ctx = await get_org_context(authorization, x_org_id)
-        steps["2_org_context"] = {"org_id": ctx.org_id, "role": ctx.role.value}
-    except Exception as e:
-        steps["2_org_context"] = {"error": str(e), "tb": traceback.format_exc()}
-        return steps
-
-    # Step 3: resolve_org_paths
-    try:
-        paths = await resolve_org_paths(authorization, x_org_id, x_project_id)
-        steps["3_paths"] = {
-            "schemas": str(paths.schemas),
-            "custom_schemas": str(paths.custom_schemas),
-            "ground_truth": str(paths.ground_truth),
-            "uploads": str(paths.uploads),
-        }
-    except Exception as e:
-        steps["3_paths"] = {"error": str(e), "tb": traceback.format_exc()}
-        return steps
-
-    steps["status"] = "all_ok"
-    return steps
-
-
-@app.post("/api/debug/upload-with-headers")
-async def debug_upload_with_headers(
-    file: UploadFile = File(...),
-    project_id: str = Form(default="test"),
-    ground_truth: UploadFile = File(default=None),
-    authorization: str = Header(default=""),
-    x_org_id: str = Header(default=""),
-    x_project_id: str = Header(default=""),
-):
-    """Debug: test full upload flow step by step."""
-    import traceback
-    steps = {}
-
-    content = await file.read()
-    steps["1_file"] = {"name": file.filename, "size": len(content)}
-
-    # Step 2: Auth
-    try:
-        ctx = await get_org_context(authorization, x_org_id)
-        steps["2_auth"] = {"org_id": ctx.org_id, "role": ctx.role.value, "user": ctx.user.sub}
-    except Exception as e:
-        steps["2_auth"] = {"error": str(e), "type": type(e).__name__}
-        return steps
-
-    # Step 3: Resolve paths
-    try:
-        paths = await resolve_org_paths(authorization, x_org_id, x_project_id)
-        steps["3_paths"] = {"uploads": str(paths.uploads), "schemas": str(paths.custom_schemas)}
-    except Exception as e:
-        steps["3_paths"] = {"error": str(e), "type": type(e).__name__}
-        return steps
-
-    # Step 4: Get project
-    try:
-        project = db.get_project(project_id)
-        steps["4_project"] = {"found": project is not None, "slug": project.slug if project else None}
-    except Exception as e:
-        steps["4_project"] = {"error": str(e)}
-        return steps
-
-    # Step 5: Save file
-    try:
-        pdf_path = paths.uploads / file.filename
-        paths.uploads.mkdir(parents=True, exist_ok=True)
-        pdf_path.write_bytes(content)
-        steps["5_save"] = {"path": str(pdf_path)}
-    except Exception as e:
-        steps["5_save"] = {"error": str(e), "tb": traceback.format_exc()}
-        return steps
-
-    # Step 6: Doc Intel
-    try:
-        from doc_intel import analyze_document
-        raw = analyze_document(str(pdf_path))
-        steps["6_doc_intel"] = {"pages": len(raw.get("pages", []))}
-    except Exception as e:
-        steps["6_doc_intel"] = {"error": str(e)}
-        return steps
-
-    # Step 7: Load schema
-    try:
-        schema = {}
-        if project:
-            sp = paths.custom_schemas / f"{project.slug}.json"
-            if sp.exists():
-                schema = json.loads(sp.read_text())
-        steps["7_schema"] = {"fields": len(schema.get("properties", {}))}
-    except Exception as e:
-        steps["7_schema"] = {"error": str(e)}
-        return steps
-
-    # Step 8: Extract
-    try:
-        from process import extract
-        extracted = extract(raw, project.slug if project else "test", schema)
-        steps["8_extract"] = {"fields": list(extracted.keys())[:10]}
-    except Exception as e:
-        steps["8_extract"] = {"error": str(e), "tb": traceback.format_exc()}
-        return steps
-
-    steps["status"] = "ALL_OK"
-    return steps
-
-
-@app.post("/api/debug/upload-test")
-async def debug_upload_test(
-    file: UploadFile = File(...),
-    project_id: str = Form(default="test"),
-    ground_truth: UploadFile = File(default=None),
-):
-    """Debug: test file upload without auth or processing."""
-    import traceback
-    steps = {}
-    try:
-        content = await file.read()
-        steps["file_received"] = {"name": file.filename, "size": len(content)}
-    except Exception as e:
-        steps["file_error"] = traceback.format_exc()
-        return steps
-
-    steps["ground_truth_provided"] = ground_truth is not None and ground_truth.filename is not None
-    steps["project_id"] = project_id
-
-    # Test Doc Intel
-    try:
-        from doc_intel import analyze_document
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(content)
-            tmp_path = tmp.name
-        raw = analyze_document(tmp_path)
-        steps["doc_intel"] = {"status": "ok", "pages": len(raw.get("pages", []))}
-        import os
-        os.unlink(tmp_path)
-    except Exception as e:
-        steps["doc_intel"] = {"status": "error", "error": str(e), "tb": traceback.format_exc()}
-        return steps
-
-    # Test extraction
-    try:
-        from process import extract
-        extracted = extract(raw, "test", {"type": "object", "properties": {"title": {"type": "string"}}})
-        steps["extraction"] = {"status": "ok", "fields": list(extracted.keys())[:5]}
-    except Exception as e:
-        steps["extraction"] = {"status": "error", "error": str(e), "tb": traceback.format_exc()}
-
-    return steps
-
-
 @app.get("/api/health")
 async def health():
     """Health check — verifies API keys and services."""
@@ -331,7 +156,7 @@ async def health():
 
 import re as _re
 import metadata as db
-from auth import get_current_user, get_org_context
+from auth import get_current_user
 from auth.models import AuthUser
 
 
@@ -428,9 +253,13 @@ async def request_join_org(
 
 @app.get("/api/orgs/requests")
 async def list_join_requests(
-    ctx: OrgContext = Depends(require_at_least(OrgRole.ORG_ADMIN)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ):
     """List pending join requests for the current org. Admin only."""
+    ctx = await get_org_context(authorization, x_org_id)
+    if not role_at_least(ctx.role, OrgRole.ORG_ADMIN):
+        raise HTTPException(403, f"Requires {OrgRole.ORG_ADMIN.value}, you have {ctx.role.value}")
     return db.list_join_requests(ctx.org_id, status="pending")
 
 
@@ -438,9 +267,13 @@ async def list_join_requests(
 async def resolve_join_request(
     request_id: str,
     approve: bool = Form(...),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.ORG_ADMIN)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ):
     """Approve or reject a join request. Admin only."""
+    ctx = await get_org_context(authorization, x_org_id)
+    if not role_at_least(ctx.role, OrgRole.ORG_ADMIN):
+        raise HTTPException(403, f"Requires {OrgRole.ORG_ADMIN.value}, you have {ctx.role.value}")
     result = db.resolve_join_request(request_id, ctx.user.sub, approve)
     if not result:
         raise HTTPException(404, "Request not found")
@@ -489,9 +322,11 @@ async def create_project(
 @app.get("/api/projects/{project_id}")
 async def get_project(
     project_id: str,
-    ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ):
     """Get project details + members."""
+    ctx = await get_org_context(authorization, x_org_id)
     project = db.get_project(project_id)
     if not project or project.org_id != ctx.org_id:
         raise HTTPException(404, "Project not found")
@@ -507,9 +342,13 @@ async def add_project_member(
     project_id: str,
     user_sub: str = Form(...),
     user_email: str = Form(""),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.ORG_ADMIN)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ):
     """Add a member to a project. Admin only."""
+    ctx = await get_org_context(authorization, x_org_id)
+    if not role_at_least(ctx.role, OrgRole.ORG_ADMIN):
+        raise HTTPException(403, f"Requires {OrgRole.ORG_ADMIN.value}, you have {ctx.role.value}")
     project = db.get_project(project_id)
     if not project or project.org_id != ctx.org_id:
         raise HTTPException(404, "Project not found")
@@ -522,9 +361,13 @@ async def add_project_member(
 async def remove_project_member(
     project_id: str,
     user_sub: str,
-    ctx: OrgContext = Depends(require_at_least(OrgRole.ORG_ADMIN)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ):
     """Remove a member from a project. Admin only."""
+    ctx = await get_org_context(authorization, x_org_id)
+    if not role_at_least(ctx.role, OrgRole.ORG_ADMIN):
+        raise HTTPException(403, f"Requires {OrgRole.ORG_ADMIN.value}, you have {ctx.role.value}")
     db.remove_project_member(project_id, user_sub)
     return {"status": "removed"}
 
@@ -537,9 +380,11 @@ async def remove_project_member(
 @app.get("/api/orgs/{org_id}/db-status")
 async def get_org_db_status(
     org_id: str,
-    ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ):
     """Return the provisioning status of the org's database."""
+    ctx = await get_org_context(authorization, x_org_id)
     if ctx.org_id != org_id:
         raise HTTPException(403, "Cannot view another org's database status")
     org_db = db.get_org_database(org_id)
@@ -552,9 +397,13 @@ async def get_org_db_status(
 async def reprovision_org_db(
     org_id: str,
     background_tasks: BackgroundTasks,
-    ctx: OrgContext = Depends(require_at_least(OrgRole.ORG_ADMIN)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ):
     """Retry provisioning for a failed org database. Admin only."""
+    ctx = await get_org_context(authorization, x_org_id)
+    if not role_at_least(ctx.role, OrgRole.ORG_ADMIN):
+        raise HTTPException(403, f"Requires {OrgRole.ORG_ADMIN.value}, you have {ctx.role.value}")
     if ctx.org_id != org_id:
         raise HTTPException(403, "Cannot reprovision another org's database")
 
@@ -577,9 +426,12 @@ async def reprovision_org_db(
 
 @app.get("/api/schemas")
 async def list_schemas(
-    paths: OrgPaths = Depends(resolve_org_paths),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
 ):
     """List all available document type schemas."""
+    _ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.VIEWER)
     schemas = {}
     # Built-in schemas (global, read-only)
     for path in sorted(SCHEMAS_DIR.glob("*.json")):
@@ -593,9 +445,12 @@ async def list_schemas(
 @app.get("/api/schemas/{doc_type}")
 async def get_schema(
     doc_type: str,
-    paths: OrgPaths = Depends(resolve_org_paths),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
 ):
     """Get a specific schema by document type."""
+    _ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.VIEWER)
     for parent in [SCHEMAS_DIR, paths.custom_schemas]:
         path = parent / f"{doc_type}.json"
         if path.exists():
@@ -608,10 +463,12 @@ async def get_schema(
 async def save_custom_schema(
     doc_type: str,
     schema: dict,
-    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
-    paths: OrgPaths = Depends(resolve_org_paths),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
 ):
     """Save a custom schema. Business users can create new; only dev+ can overwrite."""
+    ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.BUSINESS_USER)
     path = paths.custom_schemas / f"{doc_type}.json"
 
     # Business users can create new schemas but not overwrite existing ones
@@ -633,10 +490,12 @@ async def extract_pdf(
     file: UploadFile = File(...),
     doc_type: str = Form(...),
     custom_schema: str = Form(None),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
-    paths: OrgPaths = Depends(resolve_org_paths),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
 ):
     """Upload a PDF, run Doc Intel + extraction, return structured data."""
+    ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.BUSINESS_USER)
 
     upload_path = paths.uploads / file.filename
     with open(upload_path, "wb") as f:
@@ -690,9 +549,12 @@ async def extract_pdf(
 
 @app.get("/api/ground-truth")
 async def list_ground_truth(
-    paths: OrgPaths = Depends(resolve_org_paths),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
 ):
     """List all ground truth document sets."""
+    _ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.VIEWER)
     docs = []
     if not paths.ground_truth.exists():
         return docs
@@ -715,10 +577,12 @@ async def upload_ground_truth(
     pdf: UploadFile = File(...),
     truth_json: UploadFile = File(...),
     doc_type: str = Form(...),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
-    paths: OrgPaths = Depends(resolve_org_paths),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
 ):
     """Upload a ground truth document (PDF + known-correct JSON)."""
+    ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.BUSINESS_USER)
     type_dir = paths.ground_truth / doc_type
     type_dir.mkdir(parents=True, exist_ok=True)
 
@@ -748,10 +612,12 @@ async def upload_ground_truth(
 
 @app.post("/api/cache")
 async def cache_ground_truth(
-    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
-    paths: OrgPaths = Depends(resolve_org_paths),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
 ):
     """Run Azure Doc Intel on all uncached ground truth PDFs."""
+    ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.BUSINESS_USER)
     results = []
     if not paths.ground_truth.exists():
         return results
@@ -782,10 +648,12 @@ async def cache_ground_truth(
 async def generate_schema(
     description: str = Form(...),
     doc_type_key: str = Form(...),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
-    paths: OrgPaths = Depends(resolve_org_paths),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
 ):
     """Generate a JSON Schema from a plain-English description of desired fields."""
+    ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.BUSINESS_USER)
 
     # Business users can generate new schemas but not overwrite existing
     existing_path = paths.custom_schemas / f"{doc_type_key}.json"
@@ -849,10 +717,12 @@ async def save_as_ground_truth(
     source_file: str = Form(...),
     doc_type: str = Form(...),
     corrected_json: str = Form(...),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
-    paths: OrgPaths = Depends(resolve_org_paths),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
 ):
     """Save a corrected extraction result as ground truth."""
+    ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.BUSINESS_USER)
     try:
         truth_data = json.loads(corrected_json)
     except json.JSONDecodeError:
@@ -894,9 +764,13 @@ async def api_generate_sql(
     dialect: str = Form("mssql"),
     schema_name: str = Form("dbo"),
     include_ddl: bool = Form(False),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ):
     """Generate SQL INSERT (and optionally CREATE TABLE) from extracted JSON."""
+    ctx = await get_org_context(authorization, x_org_id)
+    if not role_at_least(ctx.role, OrgRole.BUSINESS_USER):
+        raise HTTPException(403, f"Requires {OrgRole.BUSINESS_USER.value}, you have {ctx.role.value}")
     try:
         data = json.loads(extracted_json)
     except json.JSONDecodeError:
@@ -915,9 +789,13 @@ async def api_generate_sql(
 async def api_execute_sql(
     sql: str = Form(...),
     connection_string: str = Form(...),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.ORG_ADMIN)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ):
     """Execute SQL against a database. Org admin only."""
+    ctx = await get_org_context(authorization, x_org_id)
+    if not role_at_least(ctx.role, OrgRole.ORG_ADMIN):
+        raise HTTPException(403, f"Requires {OrgRole.ORG_ADMIN.value}, you have {ctx.role.value}")
     from sqlalchemy import create_engine, text
 
     try:
@@ -949,9 +827,13 @@ async def api_execute_sql(
 @app.post("/api/test-connection")
 async def api_test_connection(
     connection_string: str = Form(...),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.DEVELOPER)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ):
     """Test a database connection."""
+    ctx = await get_org_context(authorization, x_org_id)
+    if not role_at_least(ctx.role, OrgRole.DEVELOPER):
+        raise HTTPException(403, f"Requires {OrgRole.DEVELOPER.value}, you have {ctx.role.value}")
     from sqlalchemy import create_engine, text
 
     try:
@@ -970,9 +852,13 @@ async def api_test_connection(
 
 @app.post("/api/evaluate")
 async def run_evaluation(
-    ctx: OrgContext = Depends(require_at_least(OrgRole.DEVELOPER)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ):
     """Run the full evaluation pipeline and return results."""
+    ctx = await get_org_context(authorization, x_org_id)
+    if not role_at_least(ctx.role, OrgRole.DEVELOPER):
+        raise HTTPException(403, f"Requires {OrgRole.DEVELOPER.value}, you have {ctx.role.value}")
     try:
         result = subprocess.run(
             ["uv", "run", "evaluate.py"],
@@ -1005,27 +891,8 @@ async def upload_document(
     x_org_id: str = Header(default=""),
     x_project_id: str = Header(default=""),
 ):
-    """Upload a PDF and optionally a ground truth file. Returns extraction result."""
-    import traceback
-    from process import extract
-    from doc_intel import analyze_document
-
-    # --- TEMPORARY DEBUG: trace every step ---
-    _debug_steps = {}
-    try:
-        ctx = await get_org_context(authorization, x_org_id)
-        _debug_steps["auth"] = f"ok: {ctx.role.value}"
-    except Exception as e:
-        return JSONResponse({"_debug": True, "steps": _debug_steps, "failed_at": "auth", "error": str(e), "type": type(e).__name__}, status_code=200)
-
-    if not role_at_least(ctx.role, OrgRole.BUSINESS_USER):
-        return JSONResponse({"_debug": True, "failed_at": "role_check", "role": ctx.role.value}, status_code=200)
-
-    try:
-        paths = await resolve_org_paths(authorization, x_org_id, x_project_id)
-        _debug_steps["paths"] = f"ok: {paths.uploads}"
-    except Exception as e:
-        return JSONResponse({"_debug": True, "steps": _debug_steps, "failed_at": "paths", "error": str(e), "type": type(e).__name__, "tb": traceback.format_exc()}, status_code=200)
+    """Upload a PDF. Returns extraction result."""
+    ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.BUSINESS_USER)
 
     # Resolve project for doc_type
     project = db.get_project(project_id)
@@ -1040,14 +907,14 @@ async def upload_document(
         content = await file.read()
         pdf_path.write_bytes(content)
     except Exception as e:
-        logger.error(f"PDF save error: {traceback.format_exc()}")
+        logger.error("PDF save error: %s", e, exc_info=True)
         raise HTTPException(500, f"Failed to save PDF: {e}")
 
     # Run Doc Intel
     try:
         raw = analyze_document(str(pdf_path))
     except Exception as e:
-        logger.error(f"Doc Intel error: {traceback.format_exc()}")
+        logger.error("Doc Intel error: %s", e, exc_info=True)
         raise HTTPException(500, f"Document Intelligence failed: {e}")
 
     # Cache the raw result
@@ -1059,7 +926,7 @@ async def upload_document(
         with open(cache_path, "w") as f:
             json.dump(raw, f, indent=2)
     except Exception as e:
-        logger.warning(f"Cache write error (non-fatal): {e}")
+        logger.warning("Cache write error (non-fatal): %s", e)
 
     # Load schema
     schema = {}
@@ -1075,7 +942,7 @@ async def upload_document(
     try:
         extracted = extract(raw, doc_type, schema)
     except Exception as e:
-        logger.error(f"Extraction error: {traceback.format_exc()}")
+        logger.error("Extraction error: %s", e, exc_info=True)
         raise HTTPException(500, f"Extraction failed: {e}")
 
     # Auto-index into Knowledge Base
@@ -1085,32 +952,13 @@ async def upload_document(
     except Exception:
         pass  # indexing failure shouldn't block extraction
 
-    # Ground truth handled separately via /api/documents/correct
-    has_ground_truth = False
-
-    result = {
+    return {
         "extracted": extracted,
         "schema": schema,
         "source_file": file.filename,
         "doc_type": doc_type,
-        "has_ground_truth": has_ground_truth,
+        "has_ground_truth": False,
     }
-
-    if has_ground_truth:
-        # Path A: save ground truth and trigger optimization
-        gt_content = await gt_file.read()
-        gt_dir = paths.ground_truth / doc_type
-        gt_dir.mkdir(parents=True, exist_ok=True)
-        (gt_dir / f"{stem}.pdf").write_bytes(content)
-        (gt_dir / f"{stem}.json").write_bytes(gt_content)
-        # Fire-and-forget optimization
-        import asyncio
-        asyncio.get_event_loop().call_soon(
-            lambda: asyncio.ensure_future(_start_optimization_bg(ctx.org_id, project_id, project.slug))
-        )
-        result["optimization_started"] = True
-
-    return result
 
 
 @app.post("/api/documents/correct")
@@ -1120,10 +968,12 @@ async def save_document_corrections(
     source_file: str = Form(...),
     doc_type: str = Form(...),
     corrected_json: str = Form(...),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
-    paths: OrgPaths = Depends(resolve_org_paths),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
 ):
     """Save user corrections as ground truth and start optimization."""
+    ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.BUSINESS_USER)
     try:
         corrected = json.loads(corrected_json)
     except json.JSONDecodeError:
@@ -1190,10 +1040,12 @@ async def _start_optimization_bg(org_id: str, project_id: str, slug: str):
 @app.get("/api/projects/{project_id}/schema")
 async def get_project_schema(
     project_id: str,
-    ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
-    paths: OrgPaths = Depends(resolve_org_paths),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
+    x_project_id: str = Header(default=""),
 ):
     """Get the schema for a specific project."""
+    ctx, paths = await _get_auth(authorization, x_org_id, x_project_id, OrgRole.VIEWER)
     project = db.get_project(project_id)
     if not project:
         raise HTTPException(404, "Project not found")
@@ -1214,9 +1066,13 @@ async def get_project_schema(
 async def start_background_optimization(
     background_tasks: BackgroundTasks,
     project_id: str = Form(...),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.DEVELOPER)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ):
     """Start Wiggum optimization with sensible defaults."""
+    ctx = await get_org_context(authorization, x_org_id)
+    if not role_at_least(ctx.role, OrgRole.DEVELOPER):
+        raise HTTPException(403, f"Requires {OrgRole.DEVELOPER.value}, you have {ctx.role.value}")
     project = db.get_project(project_id)
     if not project:
         raise HTTPException(404, "Project not found")
@@ -1228,9 +1084,11 @@ async def start_background_optimization(
 @app.get("/api/projects/{project_id}/extraction-status")
 async def get_extraction_status(
     project_id: str,
-    ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
 ):
     """Check if a project has been optimized (subsequent uploads skip the loop)."""
+    ctx = await get_org_context(authorization, x_org_id)
     latest = db.get_latest_wiggum_run(ctx.org_id, project_id)
     if latest and latest.status == "completed":
         return {
@@ -1268,10 +1126,12 @@ def _check_kb_ready(org_id: str) -> None:
 
 @app.get("/api/kb/stats")
 async def kb_stats(
-    ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
     x_project_id: str = Header(default=""),
 ):
     """Get knowledge base stats for the current org/project."""
+    ctx = await get_org_context(authorization, x_org_id)
     _check_kb_ready(ctx.org_id)
     kb_id = kb.resolve_kb_id(ctx.org_id, x_project_id)
     return kb.get_stats(kb_id)
@@ -1279,10 +1139,12 @@ async def kb_stats(
 
 @app.get("/api/kb/schema")
 async def kb_schema(
-    ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
     x_project_id: str = Header(default=""),
 ):
     """Get schema description for the knowledge base."""
+    ctx = await get_org_context(authorization, x_org_id)
     _check_kb_ready(ctx.org_id)
     kb_id = kb.resolve_kb_id(ctx.org_id, x_project_id)
     return {"schema": kb.get_schema_description(kb_id)}
@@ -1293,10 +1155,14 @@ async def kb_index(
     doc_type: str = Form(...),
     extracted_json: str = Form(...),
     source_file: str = Form(default=""),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.BUSINESS_USER)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
     x_project_id: str = Header(default=""),
 ):
     """Index extracted data into the knowledge base."""
+    ctx = await get_org_context(authorization, x_org_id)
+    if not role_at_least(ctx.role, OrgRole.BUSINESS_USER):
+        raise HTTPException(403, f"Requires {OrgRole.BUSINESS_USER.value}, you have {ctx.role.value}")
     _check_kb_ready(ctx.org_id)
     kb_id = kb.resolve_kb_id(ctx.org_id, x_project_id)
     try:
@@ -1315,10 +1181,12 @@ async def kb_index(
 @app.post("/api/kb/query")
 async def kb_query(
     question: str = Form(...),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
     x_project_id: str = Header(default=""),
 ):
     """Ask a natural language question about the knowledge base."""
+    ctx = await get_org_context(authorization, x_org_id)
     _check_kb_ready(ctx.org_id)
     kb_id = kb.resolve_kb_id(ctx.org_id, x_project_id)
     result = kb.query(kb_id, question)

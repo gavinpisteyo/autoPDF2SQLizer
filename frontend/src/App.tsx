@@ -1,3 +1,4 @@
+export const APP_VERSION = '2.0.0';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuthContext, AUTH_ENABLED } from './lib/auth';
 import { createApiClient } from './lib/api';

@@ -10,9 +10,10 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Header, HTTPException
+from fastapi import APIRouter, Form, Header, HTTPException
 
-from auth import OrgContext, OrgRole, require_at_least
+from auth import OrgContext, OrgRole, get_org_context
+from auth.models import role_at_least
 import metadata as db
 import wiggum_trigger as trigger
 
@@ -74,10 +75,14 @@ async def start_wiggum(
     cycles: int = Form(default=5),
     experiments: int = Form(default=5),
     model: str = Form(default="claude-sonnet-4-20250514"),
-    ctx: OrgContext = Depends(require_at_least(OrgRole.DEVELOPER)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
     x_project_id: str = Header(default=""),
 ):
     """Start a Wiggum optimization run."""
+    ctx = await get_org_context(authorization, x_org_id)
+    if not role_at_least(ctx.role, OrgRole.DEVELOPER):
+        raise HTTPException(403, f"Requires {OrgRole.DEVELOPER.value}, you have {ctx.role.value}")
 
     # Validate GitHub configuration
     try:
@@ -158,10 +163,12 @@ async def start_wiggum(
 
 @router.get("/status")
 async def get_wiggum_status(
-    ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
     x_project_id: str = Header(default=""),
 ):
     """Get latest Wiggum run status for current org+project."""
+    ctx = await get_org_context(authorization, x_org_id)
 
     project = _resolve_project(ctx, x_project_id)
     latest = db.get_latest_wiggum_run(ctx.org_id, project.id)
@@ -207,10 +214,12 @@ async def get_wiggum_status(
 
 @router.get("/history")
 async def get_wiggum_history(
-    ctx: OrgContext = Depends(require_at_least(OrgRole.VIEWER)),
+    authorization: str = Header(default=""),
+    x_org_id: str = Header(default=""),
     x_project_id: str = Header(default=""),
 ):
     """List all Wiggum runs for current org+project."""
+    ctx = await get_org_context(authorization, x_org_id)
 
     project = _resolve_project(ctx, x_project_id)
     runs = db.list_wiggum_runs(ctx.org_id, project.id)
