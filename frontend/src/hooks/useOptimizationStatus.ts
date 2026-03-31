@@ -33,7 +33,9 @@ export function useOptimizationStatus(api: ApiClient, enabled: boolean, projectI
   const fetchStatus = useCallback(async () => {
     try {
       const data = await api.getWiggumStatus(projectId);
-      const latestRun: OptimizationRun | null = data.run ?? null;
+      // Status endpoint returns the run directly (not wrapped in {run: ...})
+      // If status is "none", there's no run
+      const latestRun: OptimizationRun | null = data.status === 'none' ? null : (data as OptimizationRun);
       setRun(latestRun);
       setError(null);
 
