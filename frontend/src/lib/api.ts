@@ -221,7 +221,8 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
     return post('/wiggum/start', fd);
   }
 
-  const getWiggumStatus = () => get('/wiggum/status');
+  const getWiggumStatus = (projectId?: string) =>
+    get(projectId ? `/wiggum/status?project_id=${projectId}` : '/wiggum/status');
   const getWiggumHistory = () => get('/wiggum/history');
 
   // -- Knowledge Base (RAG) --

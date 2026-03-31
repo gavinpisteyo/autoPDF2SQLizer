@@ -165,6 +165,7 @@ async def start_wiggum(
 
 @router.get("/status")
 async def get_wiggum_status(
+    project_id: str = "",
     authorization: str = Header(default=""),
     x_org_id: str = Header(default=""),
     x_project_id: str = Header(default=""),
@@ -172,9 +173,11 @@ async def get_wiggum_status(
     """Get latest Wiggum run status for current org+project."""
     ctx = await get_org_context(authorization, x_org_id)
 
-    project = _resolve_project(ctx, x_project_id)
-    project_id = project.id if project else x_project_id or ""
-    latest = db.get_latest_wiggum_run(ctx.org_id, project_id)
+    # Accept project_id from query param OR header
+    pid = project_id or x_project_id
+    project = _resolve_project(ctx, pid) if pid else None
+    resolved_pid = project.id if project else pid or ""
+    latest = db.get_latest_wiggum_run(ctx.org_id, resolved_pid)
 
     if not latest:
         return {"status": "none", "message": "No Wiggum runs found for this project"}

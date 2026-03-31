@@ -21,7 +21,7 @@ export interface OptimizationRun {
 const ACTIVE_STATUSES = new Set(['pending', 'queued', 'in_progress']);
 const POLL_INTERVAL = 10_000;
 
-export function useOptimizationStatus(api: ApiClient, enabled: boolean) {
+export function useOptimizationStatus(api: ApiClient, enabled: boolean, projectId?: string) {
   const [run, setRun] = useState<OptimizationRun | null>(null);
   const [displayedAccuracy, setDisplayedAccuracy] = useState<number>(0);
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -32,7 +32,7 @@ export function useOptimizationStatus(api: ApiClient, enabled: boolean) {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const data = await api.getWiggumStatus();
+      const data = await api.getWiggumStatus(projectId);
       const latestRun: OptimizationRun | null = data.run ?? null;
       setRun(latestRun);
       setError(null);
@@ -56,7 +56,7 @@ export function useOptimizationStatus(api: ApiClient, enabled: boolean) {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unknown error');
     }
-  }, [api]);
+  }, [api, projectId]);
 
   // Initial fetch and cleanup
   useEffect(() => {

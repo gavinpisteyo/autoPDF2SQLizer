@@ -198,7 +198,7 @@ export default function DocumentsTab({ api, onGoToChat }: DocumentsTabProps) {
 
       {/* OPTIMIZING */}
       {workflow.workflowState === 'OPTIMIZING' && (
-        <OptimizationBanner api={api} onComplete={workflow.completeOptimization} onGoToChat={onGoToChat} />
+        <OptimizationBanner api={api} projectId={workflow.selectedProject?.id || ''} onComplete={workflow.completeOptimization} onGoToChat={onGoToChat} />
       )}
 
       {/* COMPLETE */}

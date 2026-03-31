@@ -3,12 +3,13 @@ import type { ApiClient } from '../lib/api';
 
 interface OptimizationBannerProps {
   api: ApiClient;
+  projectId: string;
   onComplete: () => void;
   onGoToChat: () => void;
 }
 
-export default function OptimizationBanner({ api, onComplete, onGoToChat }: OptimizationBannerProps) {
-  const { displayedAccuracy, isOptimizing, isComplete, error } = useOptimizationStatus(api, true);
+export default function OptimizationBanner({ api, projectId, onComplete, onGoToChat }: OptimizationBannerProps) {
+  const { displayedAccuracy, isOptimizing, isComplete, error } = useOptimizationStatus(api, true, projectId);
 
   // Error state
   if (error) {
