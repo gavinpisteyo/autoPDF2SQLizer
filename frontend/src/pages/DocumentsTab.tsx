@@ -18,18 +18,41 @@ interface DocumentsTabProps {
 type SchemaProps = Record<string, { type?: string; [k: string]: unknown }>;
 
 export default function DocumentsTab({ api, onGoToChat }: DocumentsTabProps) {
-  const { setProjectId } = useAuthContext();
+  const { setProjectId, projectId: authProjectId } = useAuthContext();
   const workflow = useDocumentWorkflow();
   const [status, setStatus] = useState<{ msg: string; type: 'success' | 'error' | 'loading' | null }>({ msg: '', type: null });
   const [saving, setSaving] = useState(false);
   const [schema, setSchema] = useState<SchemaProps>({});
   const [documents, setDocuments] = useState<Array<{ name: string; doc_type: string; date?: string }>>([]);
+  const [restoredProject, setRestoredProject] = useState(false);
+
+  // On mount: restore active project from auth context (survives page reload)
+  useEffect(() => {
+    if (restoredProject || workflow.workflowState !== 'SELECT_PROJECT') return;
+    if (!authProjectId) { setRestoredProject(true); return; }
+
+    // Fetch the project and auto-select it
+    api.getProject(authProjectId).then((project: ProjectInfo) => {
+      if (project?.id) {
+        // Check if there's an active optimization run
+        api.getWiggumStatus(project.id).then((ws: { status: string }) => {
+          if (ws.status === 'in_progress' || ws.status === 'pending' || ws.status === 'queued') {
+            workflow.selectProject(project);
+            workflow.startOptimization('');
+          } else {
+            workflow.selectProject(project);
+          }
+        }).catch(() => {
+          workflow.selectProject(project);
+        });
+      }
+    }).catch(() => {}).finally(() => setRestoredProject(true));
+  }, [authProjectId, restoredProject, api, workflow]);
 
   // Load schema whenever project changes
   const loadSchema = useCallback(async (projectId: string) => {
     try {
       const data = await api.getProjectSchema(projectId);
-      // Endpoint returns raw schema — properties is at top level
       const props = data?.properties || data?.schema?.properties;
       if (props) setSchema(props as SchemaProps);
     } catch {}
