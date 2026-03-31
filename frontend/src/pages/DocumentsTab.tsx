@@ -34,13 +34,12 @@ export default function DocumentsTab({ api, onGoToChat }: DocumentsTabProps) {
     // Fetch the project and auto-select it
     api.getProject(authProjectId).then((project: ProjectInfo) => {
       if (project?.id) {
-        // Check if there's an active optimization run
+        // Check if there's an active or recently failed optimization run
         api.getWiggumStatus(project.id).then((ws: { status: string }) => {
-          if (ws.status === 'in_progress' || ws.status === 'pending' || ws.status === 'queued') {
-            workflow.selectProject(project);
+          workflow.selectProject(project);
+          if (['in_progress', 'pending', 'queued', 'failed'].includes(ws.status)) {
+            // Show the optimization banner (handles both running and failed states)
             workflow.startOptimization('');
-          } else {
-            workflow.selectProject(project);
           }
         }).catch(() => {
           workflow.selectProject(project);

@@ -92,6 +92,27 @@ async def _get_auth(
 
 app = FastAPI(title="autoPDF2SQLizer", version="0.1.0")
 
+
+@app.on_event("startup")
+def _cleanup_stale_runs():
+    """Mark any in_progress Wiggum runs as failed on app startup.
+    These were killed by a deploy/restart while running."""
+    try:
+        conn = db._get_conn()
+        stale = conn.execute(
+            "SELECT id FROM wiggum_runs WHERE status IN ('pending', 'queued', 'in_progress')"
+        ).fetchall()
+        for row in stale:
+            conn.execute(
+                "UPDATE wiggum_runs SET status = 'failed', completed_at = ? WHERE id = ?",
+                (datetime.now(timezone.utc).isoformat(), row["id"]),
+            )
+            logger.warning("Marked stale Wiggum run %s as failed (app restart)", row["id"])
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.warning("Failed to clean up stale Wiggum runs: %s", e)
+
 # NOTE: CORS middleware is added AFTER RequestLoggingMiddleware below
 # so that CORS runs first (Starlette processes last-added middleware first)
 
