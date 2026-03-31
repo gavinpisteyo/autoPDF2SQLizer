@@ -8,16 +8,15 @@ import LoginScreen from './components/LoginScreen';
 import OnboardingScreen from './components/OnboardingScreen';
 import DocumentsTab from './pages/DocumentsTab';
 import ChatTab from './pages/ChatTab';
-import ProjectsTab from './pages/ProjectsTab';
 import ProfilePage from './pages/ProfilePage';
 
-type TabId = 'documents' | 'chat' | 'projects';
+type TabId = 'projects' | 'chat';
 
 export default function App() {
   const auth = useAuthContext();
   const { isAuthenticated, isLoading, getToken, orgId, projectId, setRole } = auth;
 
-  const [activeTab, setActiveTab] = useState<TabId>('documents');
+  const [activeTab, setActiveTab] = useState<TabId>('projects');
   const [showProfile, setShowProfile] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
@@ -94,11 +93,10 @@ export default function App() {
       />
 
       {/* Panels */}
-      {activeTab === 'documents' && (
+      {activeTab === 'projects' && (
         <DocumentsTab api={api} onGoToChat={handleGoToChat} />
       )}
       {activeTab === 'chat' && <ChatTab api={api} />}
-      {activeTab === 'projects' && <ProjectsTab api={api} />}
 
       {/* Profile overlay */}
       {showProfile && (

@@ -1,6 +1,6 @@
 import { useAuthContext } from '../lib/auth';
 
-type TabId = 'documents' | 'chat' | 'projects';
+type TabId = 'projects' | 'chat';
 
 interface TopBarProps {
   activeTab: TabId;
@@ -9,9 +9,8 @@ interface TopBarProps {
 }
 
 const TABS: { id: TabId; label: string }[] = [
-  { id: 'documents', label: 'Documents' },
-  { id: 'chat', label: 'Chat' },
   { id: 'projects', label: 'Projects' },
+  { id: 'chat', label: 'Chat' },
 ];
 
 export default function TopBar({ activeTab, onTabChange, onProfileClick }: TopBarProps) {

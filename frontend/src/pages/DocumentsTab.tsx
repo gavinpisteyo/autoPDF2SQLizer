@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useDocumentWorkflow } from '../hooks/useDocumentWorkflow';
 import type { ProjectInfo } from '../hooks/useDocumentWorkflow';
 import ProjectSelector from '../components/ProjectSelector';
@@ -14,141 +14,122 @@ interface DocumentsTabProps {
   onGoToChat: () => void;
 }
 
-interface SchemaProperties {
-  [key: string]: {
-    type?: string;
-    items?: SchemaProperties;
-    properties?: Record<string, SchemaProperties>;
-    [k: string]: unknown;
-  };
-}
+type SchemaProps = Record<string, { type?: string; [k: string]: unknown }>;
 
 export default function DocumentsTab({ api, onGoToChat }: DocumentsTabProps) {
   const workflow = useDocumentWorkflow();
-  const [extractionStatus, setExtractionStatus] = useState<{ msg: string; type: 'success' | 'error' | 'loading' | null }>({ msg: '', type: null });
+  const [status, setStatus] = useState<{ msg: string; type: 'success' | 'error' | 'loading' | null }>({ msg: '', type: null });
   const [saving, setSaving] = useState(false);
-  const [schemaProperties, setSchemaProperties] = useState<SchemaProperties>({});
+  const [schema, setSchema] = useState<SchemaProps>({});
+  const [documents, setDocuments] = useState<Array<{ name: string; doc_type: string; date?: string }>>([]);
+
+  // Load schema whenever project changes
+  const loadSchema = useCallback(async (projectId: string) => {
+    try {
+      const data = await api.getProjectSchema(projectId);
+      // Endpoint returns raw schema — properties is at top level
+      const props = data?.properties || data?.schema?.properties;
+      if (props) setSchema(props as SchemaProps);
+    } catch {}
+  }, [api]);
+
+  // Load documents list for the project
+  const loadDocuments = useCallback(async () => {
+    if (!workflow.selectedProject?.id) return;
+    try {
+      const gt = await api.listGroundTruth();
+      setDocuments(Array.isArray(gt) ? gt.map((d: { name: string; doc_type: string }) => ({
+        name: d.name, doc_type: d.doc_type, date: 'Uploaded',
+      })) : []);
+    } catch {
+      setDocuments([]);
+    }
+  }, [api, workflow.selectedProject?.id]);
+
+  useEffect(() => {
+    if (workflow.selectedProject?.id && workflow.workflowState !== 'SELECT_PROJECT' && workflow.workflowState !== 'DEFINE_SCHEMA') {
+      loadSchema(workflow.selectedProject.id);
+      loadDocuments();
+    }
+  }, [workflow.selectedProject?.id, workflow.workflowState, loadSchema, loadDocuments]);
 
   const handleProjectSelected = (project: ProjectInfo) => {
     workflow.selectProject(project);
-
-    // Try to load the project schema for later use in results table
-    if (project.id) {
-      api.getProjectSchema(project.id)
-        .then((data: { schema?: { properties?: SchemaProperties } }) => {
-          if (data.schema?.properties) {
-            setSchemaProperties(data.schema.properties);
-          }
-        })
-        .catch(() => {});
-    }
   };
 
-  const handleSchemaGenerated = (docTypeKey: string, schema: Record<string, unknown>, projectId: string) => {
-    workflow.setSchemaGenerated(docTypeKey, schema, projectId);
-    const props = (schema as { properties?: SchemaProperties }).properties;
-    if (props) {
-      setSchemaProperties(props);
-    }
+  const handleSchemaGenerated = (docTypeKey: string, schemaObj: Record<string, unknown>, projectId: string) => {
+    workflow.setSchemaGenerated(docTypeKey, schemaObj, projectId);
+    const props = (schemaObj as { properties?: SchemaProps }).properties;
+    if (props) setSchema(props);
   };
 
   const handleUploadSubmit = async (pdfFile: File, groundTruthFile?: File) => {
     if (!workflow.selectedProject?.id) return;
 
     workflow.startExtraction();
-    setExtractionStatus({ msg: 'Extracting document...', type: 'loading' });
+    setStatus({ msg: 'Extracting document... this may take a moment.', type: 'loading' });
 
     try {
       const data = await api.uploadDocument(workflow.selectedProject.id, pdfFile, groundTruthFile);
       const docType = (data.doc_type as string) || workflow.docTypeKey;
 
-      // Always load schema from response (ensures table shows all schema fields)
-      if (data.schema?.properties) {
-        setSchemaProperties(data.schema.properties as SchemaProperties);
-      } else if (Object.keys(schemaProperties).length === 0) {
-        // Fallback: fetch schema from project if not in response
-        try {
-          const schemaData = await api.getProjectSchema(workflow.selectedProject.id);
-          if (schemaData?.properties) {
-            setSchemaProperties(schemaData.properties as SchemaProperties);
-          }
-        } catch {}
+      // Load schema from response if available
+      const respSchema = data.schema?.properties || data.schema;
+      if (respSchema && typeof respSchema === 'object' && Object.keys(respSchema).length > 0) {
+        setSchema(respSchema as SchemaProps);
       }
 
       if (data.extracted) {
         const extracted = data.extracted as Record<string, unknown>;
-        const populatedFields = Object.entries(extracted).filter(([, v]) => v !== null && v !== '' && v !== undefined);
+        const filled = Object.values(extracted).filter(v => v !== null && v !== '' && v !== undefined).length;
 
         workflow.setExtractionResults(extracted, data.source_file as string || '', docType);
 
-        if (populatedFields.length === 0) {
-          setExtractionStatus({
-            msg: 'No matching values found in the document, but your schema fields are shown below. Fill them in manually.',
-            type: 'error',
-          });
+        if (filled === 0) {
+          setStatus({ msg: 'No values found in the document. Your schema fields are shown below — fill them in.', type: 'error' });
         } else {
-          setExtractionStatus({ msg: `Extraction complete — ${populatedFields.length} field(s) found. Review and correct below.`, type: 'success' });
+          setStatus({ msg: `Found ${filled} field(s). Review and correct below.`, type: 'success' });
         }
       } else {
-        setExtractionStatus({ msg: data.message as string || 'Extraction completed', type: 'success' });
+        setStatus({ msg: 'Extraction completed.', type: 'success' });
         workflow.completeOptimization();
       }
     } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : 'Extraction failed';
-      setExtractionStatus({ msg: `Extraction error: ${errMsg}`, type: 'error' });
-      // Stay on UPLOAD so the error is visible — don't hide it
+      setStatus({ msg: `Extraction error: ${e instanceof Error ? e.message : 'Unknown'}`, type: 'error' });
       workflow.goToUpload();
     }
   };
 
   const handleSaveCorrections = async (correctedData: Record<string, unknown>) => {
     if (!workflow.selectedProject?.id) return;
-
     setSaving(true);
     try {
-      const result = await api.saveCorrections(
+      await api.saveCorrections(
         workflow.selectedProject.id,
         workflow.sourceFile,
         workflow.docTypeKey,
         correctedData,
       );
-
-      // Start background optimization if applicable
-      if (result.optimization_started) {
-        workflow.startOptimization(result.run_id as string || '');
-      } else {
-        workflow.completeOptimization();
-      }
+      // Go to optimization state (banner)
+      workflow.startOptimization('');
+      setStatus({ msg: 'Corrections saved. Optimization starting...', type: 'success' });
     } catch (e: unknown) {
-      setExtractionStatus({ msg: e instanceof Error ? e.message : 'Save failed', type: 'error' });
+      setStatus({ msg: `Save error: ${e instanceof Error ? e.message : 'Unknown'}`, type: 'error' });
     } finally {
       setSaving(false);
     }
   };
 
-  const handleStartOptimization = async () => {
-    if (!workflow.selectedProject?.id) return;
-    try {
-      const result = await api.startBackgroundOptimization(workflow.selectedProject.id);
-      workflow.startOptimization(result.run_id as string || '');
-    } catch (e: unknown) {
-      setExtractionStatus({ msg: e instanceof Error ? e.message : 'Failed to start optimization', type: 'error' });
-    }
-  };
-
   return (
     <div>
-      {/* Back button when not at project selection */}
+      {/* Back button */}
       {workflow.workflowState !== 'SELECT_PROJECT' && (
-        <button
-          onClick={workflow.reset}
-          className="mb-5 text-[0.8125rem] text-mid hover:text-silver transition-colors"
-        >
+        <button onClick={workflow.reset} className="mb-5 text-[0.8125rem] text-mid hover:text-silver transition-colors">
           &larr; Back to projects
         </button>
       )}
 
-      {/* Project name header when a project is selected */}
+      {/* Project header */}
       {workflow.selectedProject && workflow.workflowState !== 'SELECT_PROJECT' && (
         <div className="mb-5 pb-4 border-b border-border">
           <h2 className="font-heading text-lg font-semibold text-cloud tracking-tight">
@@ -159,32 +140,35 @@ export default function DocumentsTab({ api, onGoToChat }: DocumentsTabProps) {
 
       {/* SELECT_PROJECT */}
       {workflow.workflowState === 'SELECT_PROJECT' && (
-        <ProjectSelector
-          api={api}
-          onProjectSelected={handleProjectSelected}
-          onCreateNew={workflow.startCreateProject}
-        />
+        <ProjectSelector api={api} onProjectSelected={handleProjectSelected} onCreateNew={workflow.startCreateProject} />
       )}
 
       {/* DEFINE_SCHEMA */}
       {workflow.workflowState === 'DEFINE_SCHEMA' && workflow.selectedProject && (
-        <SchemaGenerator
-          api={api}
-          projectName={workflow.selectedProject.name}
-          onSchemaGenerated={handleSchemaGenerated}
-        />
+        <SchemaGenerator api={api} projectName={workflow.selectedProject.name} onSchemaGenerated={handleSchemaGenerated} />
       )}
 
-      {/* UPLOAD */}
-      {workflow.workflowState === 'UPLOAD' && workflow.selectedProject && (
+      {/* UPLOAD / READY */}
+      {(workflow.workflowState === 'UPLOAD' || workflow.workflowState === 'READY') && workflow.selectedProject && (
         <div>
-          {extractionStatus.type === 'error' && (
-            <StatusMessage message={extractionStatus.msg} type={extractionStatus.type} />
+          {status.type === 'error' && <StatusMessage message={status.msg} type={status.type} />}
+
+          {/* Previously uploaded documents */}
+          {documents.length > 0 && (
+            <div className="mb-8">
+              <h3 className="text-xs font-semibold text-silver uppercase tracking-wide mb-3">Uploaded Documents</h3>
+              <div className="space-y-1.5">
+                {documents.map((d, i) => (
+                  <div key={i} className="flex items-center justify-between py-2 px-3 bg-surface border border-border-strong rounded-md text-[0.8125rem]">
+                    <span className="text-silver">{d.doc_type}/{d.name}</span>
+                    <span className="text-[0.6875rem] text-mid">{d.date}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
-          <UploadArea
-            onSubmit={handleUploadSubmit}
-            projectName={workflow.selectedProject.name}
-          />
+
+          <UploadArea onSubmit={handleUploadSubmit} projectName={workflow.selectedProject.name} />
         </div>
       )}
 
@@ -194,18 +178,17 @@ export default function DocumentsTab({ api, onGoToChat }: DocumentsTabProps) {
           <div className="w-3 h-3 rounded-full bg-coral animate-pulse mb-4" />
           <p className="text-[0.8125rem] text-silver mb-2">Extracting document...</p>
           <p className="text-[0.6875rem] text-mid">This may take a moment.</p>
-          <StatusMessage message={extractionStatus.msg} type={extractionStatus.type} />
         </div>
       )}
 
       {/* REVIEW_RESULTS */}
-      {workflow.workflowState === 'REVIEW_RESULTS' && workflow.extractionResults && (
+      {workflow.workflowState === 'REVIEW_RESULTS' && (
         <div>
-          <StatusMessage message={extractionStatus.msg} type={extractionStatus.type} />
+          <StatusMessage message={status.msg} type={status.type} />
           <div className="mt-4">
             <ResultsTable
-              data={workflow.extractionResults}
-              schema={schemaProperties}
+              data={workflow.extractionResults || {}}
+              schema={schema}
               onSave={handleSaveCorrections}
               saving={saving}
             />
@@ -215,11 +198,7 @@ export default function DocumentsTab({ api, onGoToChat }: DocumentsTabProps) {
 
       {/* OPTIMIZING */}
       {workflow.workflowState === 'OPTIMIZING' && (
-        <OptimizationBanner
-          api={api}
-          onComplete={workflow.completeOptimization}
-          onGoToChat={onGoToChat}
-        />
+        <OptimizationBanner api={api} onComplete={workflow.completeOptimization} onGoToChat={onGoToChat} />
       )}
 
       {/* COMPLETE */}
@@ -228,46 +207,19 @@ export default function DocumentsTab({ api, onGoToChat }: DocumentsTabProps) {
           <div className="w-12 h-12 rounded-full bg-sage-bg flex items-center justify-center mx-auto mb-4">
             <div className="w-3 h-3 rounded-full bg-sage" />
           </div>
-          <h2 className="font-heading text-lg font-semibold text-cloud tracking-tight mb-2">
-            Document Processed
-          </h2>
+          <h2 className="font-heading text-lg font-semibold text-cloud tracking-tight mb-2">Document Processed</h2>
           <p className="text-[0.8125rem] text-mid font-light mb-6">
-            Your data has been extracted and saved. You can query it in Chat or upload more documents.
+            Your data has been extracted and saved. Query it in Chat or upload more documents.
           </p>
           <div className="flex gap-3 justify-center">
-            <button
-              onClick={workflow.uploadAnother}
-              className="px-5 py-2.5 text-[0.8125rem] font-medium bg-coral text-white rounded-md
-                         hover:bg-coral-muted active:translate-y-px transition-all"
-            >
+            <button onClick={workflow.uploadAnother} className="px-5 py-2.5 text-[0.8125rem] font-medium bg-coral text-white rounded-md hover:bg-coral-muted active:translate-y-px transition-all">
               Upload Another
             </button>
-            <button
-              onClick={onGoToChat}
-              className="px-5 py-2.5 text-[0.8125rem] font-medium bg-transparent border border-border-strong text-silver rounded-md
-                         hover:bg-white/[0.04] transition-colors"
-            >
+            <button onClick={onGoToChat} className="px-5 py-2.5 text-[0.8125rem] font-medium bg-transparent border border-border-strong text-silver rounded-md hover:bg-white/[0.04] transition-colors">
               Go to Chat
             </button>
-            {workflow.selectedProject && !workflow.selectedProject.is_optimized && (
-              <button
-                onClick={handleStartOptimization}
-                className="px-5 py-2.5 text-[0.8125rem] font-medium bg-transparent border border-coral/30 text-coral rounded-md
-                           hover:bg-coral/[0.08] transition-colors"
-              >
-                Optimize Extraction
-              </button>
-            )}
           </div>
         </div>
-      )}
-
-      {/* READY (subsequent uploads, project already has data) */}
-      {workflow.workflowState === 'READY' && workflow.selectedProject && (
-        <UploadArea
-          onSubmit={handleUploadSubmit}
-          projectName={workflow.selectedProject.name}
-        />
       )}
     </div>
   );
