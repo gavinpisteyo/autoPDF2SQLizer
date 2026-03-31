@@ -45,13 +45,17 @@ function parseCellValue(raw: string, type?: string): unknown {
 
 export default function ResultsTable({ data, schema, onSave, saving }: ResultsTableProps) {
   const [editedData, setEditedData] = useState<Record<string, unknown>>({ ...data });
+  const [newFieldName, setNewFieldName] = useState('');
+  const [showAddField, setShowAddField] = useState(false);
 
   const scalarFields: string[] = [];
   const arrayFields: string[] = [];
 
-  for (const key of Object.keys(schema)) {
+  // Include schema fields AND any extra fields in the data
+  const allKeys = new Set([...Object.keys(schema), ...Object.keys(editedData)]);
+  for (const key of allKeys) {
     const prop = schema[key];
-    if (prop.type === 'array' && prop.items?.properties) {
+    if (prop?.type === 'array' && prop.items?.properties) {
       arrayFields.push(key);
     } else {
       scalarFields.push(key);
@@ -62,6 +66,22 @@ export default function ResultsTable({ data, schema, onSave, saving }: ResultsTa
     const prop = schema[key];
     const parsed = parseCellValue(value, prop?.type);
     setEditedData(prev => ({ ...prev, [key]: parsed }));
+  };
+
+  const handleRemoveField = (key: string) => {
+    setEditedData(prev => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const handleAddField = () => {
+    if (!newFieldName.trim()) return;
+    const key = newFieldName.trim().toLowerCase().replace(/\s+/g, '_');
+    setEditedData(prev => ({ ...prev, [key]: '' }));
+    setNewFieldName('');
+    setShowAddField(false);
   };
 
   const handleArrayChange = (key: string, updatedItems: Record<string, unknown>[]) => {
@@ -78,12 +98,12 @@ export default function ResultsTable({ data, schema, onSave, saving }: ResultsTa
         Review Extracted Data
       </h2>
       <p className="text-[0.8125rem] text-mid font-light mb-5">
-        Edit any fields that need correction, then save.
+        Edit any fields that need correction. Add missing fields with the button below.
       </p>
 
       {/* Scalar fields as a table */}
       {scalarFields.length > 0 && (
-        <div className="overflow-x-auto mb-5">
+        <div className="overflow-x-auto mb-3">
           <table className="w-full text-[0.8125rem] border-collapse">
             <thead>
               <tr>
@@ -93,6 +113,7 @@ export default function ResultsTable({ data, schema, onSave, saving }: ResultsTa
                 <th className="text-left text-[0.6875rem] text-mid uppercase tracking-wide pb-2 border-b border-border font-medium">
                   Value
                 </th>
+                <th className="w-10 border-b border-border" />
               </tr>
             </thead>
             <tbody>
@@ -110,6 +131,17 @@ export default function ResultsTable({ data, schema, onSave, saving }: ResultsTa
                                  outline-none focus:border-coral transition-colors"
                     />
                   </td>
+                  <td className="py-2.5 text-center">
+                    {!schema[key] && (
+                      <button
+                        onClick={() => handleRemoveField(key)}
+                        className="text-mid hover:text-red-400 transition-colors text-xs"
+                        title="Remove field"
+                      >
+                        &times;
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -117,10 +149,39 @@ export default function ResultsTable({ data, schema, onSave, saving }: ResultsTa
         </div>
       )}
 
+      {/* Add field button */}
+      {showAddField ? (
+        <div className="flex gap-2 mb-5">
+          <input
+            type="text"
+            value={newFieldName}
+            onChange={(e) => setNewFieldName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddField()}
+            placeholder="Field name (e.g. quarter_4_ebitda)"
+            className="flex-1 px-3 py-2 text-sm bg-deep border border-border-strong rounded-md text-silver
+                       outline-none focus:border-coral transition-colors"
+            autoFocus
+          />
+          <button onClick={handleAddField} className="px-3 py-2 text-xs font-medium bg-coral text-white rounded-md hover:bg-coral-muted transition-all">
+            Add
+          </button>
+          <button onClick={() => { setShowAddField(false); setNewFieldName(''); }} className="px-3 py-2 text-xs font-medium text-mid hover:text-silver transition-colors">
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setShowAddField(true)}
+          className="mb-5 text-[0.8125rem] text-coral hover:underline transition-colors"
+        >
+          + Add a field
+        </button>
+      )}
+
       {/* Array fields as sub-tables */}
       {arrayFields.map(key => {
         const items = Array.isArray(editedData[key]) ? editedData[key] as Record<string, unknown>[] : [];
-        const itemSchema = schema[key].items as SchemaProperty;
+        const itemSchema = schema[key]?.items as SchemaProperty;
 
         return (
           <NestedResultsTable

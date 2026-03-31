@@ -31,10 +31,10 @@ ACTIVE_STATUSES = {"pending", "queued", "in_progress"}
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_project(ctx: OrgContext, x_project_id: str) -> db.Project:
-    """Resolve and validate the project from the header."""
+def _resolve_project(ctx: OrgContext, x_project_id: str) -> db.Project | None:
+    """Resolve and validate the project from the header. Returns None if no header."""
     if not x_project_id:
-        raise HTTPException(400, "x-project-id header is required for Wiggum operations")
+        return None
 
     project = db.get_project(x_project_id)
     if not project or project.org_id != ctx.org_id:
@@ -92,6 +92,8 @@ async def start_wiggum(
 
     # Resolve project
     project = _resolve_project(ctx, x_project_id)
+    if not project:
+        raise HTTPException(400, "x-project-id header is required to start Wiggum")
 
     # Check no active run exists for this org+project
     latest = db.get_latest_wiggum_run(ctx.org_id, project.id)
@@ -171,7 +173,8 @@ async def get_wiggum_status(
     ctx = await get_org_context(authorization, x_org_id)
 
     project = _resolve_project(ctx, x_project_id)
-    latest = db.get_latest_wiggum_run(ctx.org_id, project.id)
+    project_id = project.id if project else x_project_id or ""
+    latest = db.get_latest_wiggum_run(ctx.org_id, project_id)
 
     if not latest:
         return {"status": "none", "message": "No Wiggum runs found for this project"}
@@ -222,7 +225,8 @@ async def get_wiggum_history(
     ctx = await get_org_context(authorization, x_org_id)
 
     project = _resolve_project(ctx, x_project_id)
-    runs = db.list_wiggum_runs(ctx.org_id, project.id)
+    project_id = project.id if project else x_project_id or ""
+    runs = db.list_wiggum_runs(ctx.org_id, project_id)
 
     return runs
 
