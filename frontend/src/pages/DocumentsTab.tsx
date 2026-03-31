@@ -66,8 +66,21 @@ export default function DocumentsTab({ api, onGoToChat }: DocumentsTabProps) {
       }
 
       if (data.extracted) {
-        workflow.setExtractionResults(data.extracted as Record<string, unknown>, data.source_file as string || '');
-        setExtractionStatus({ msg: 'Extraction complete. Review the results below.', type: 'success' });
+        const extracted = data.extracted as Record<string, unknown>;
+        // Check if any fields were actually populated
+        const populatedFields = Object.entries(extracted).filter(([, v]) => v !== null && v !== '' && v !== undefined);
+
+        if (populatedFields.length === 0) {
+          // No fields extracted — show helpful message instead of blank table
+          setExtractionStatus({
+            msg: 'The document was processed but no matching fields were found. This can happen if the document layout doesn\'t match the schema. Try uploading a different document or adjusting your schema description.',
+            type: 'error',
+          });
+          workflow.setExtractionResults(extracted, data.source_file as string || '');
+        } else {
+          workflow.setExtractionResults(extracted, data.source_file as string || '');
+          setExtractionStatus({ msg: `Extraction complete — ${populatedFields.length} field(s) found. Review and correct below.`, type: 'success' });
+        }
       } else {
         setExtractionStatus({ msg: data.message as string || 'Extraction completed', type: 'success' });
         workflow.completeOptimization();

@@ -187,12 +187,12 @@ export function createApiClient(getToken: GetToken, orgId: string, projectId: st
   }
 
   async function saveCorrections(projectId: string, sourceFile: string, docType: string, correctedJson: Record<string, unknown>) {
-    return post('/documents/correct', {
-      project_id: projectId,
-      source_file: sourceFile,
-      doc_type: docType,
-      corrected_json: correctedJson,
-    });
+    const fd = new FormData();
+    fd.append('project_id', projectId);
+    fd.append('source_file', sourceFile);
+    fd.append('doc_type', docType);
+    fd.append('corrected_json', JSON.stringify(correctedJson));
+    return post('/documents/correct', fd);
   }
 
   const getProjectSchema = (projectId: string) => get(`/projects/${projectId}/schema`);

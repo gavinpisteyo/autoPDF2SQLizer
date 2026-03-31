@@ -660,15 +660,31 @@ async def generate_schema(
     if existing_path.exists() and ctx.role == OrgRole.BUSINESS_USER:
         raise HTTPException(403, "Business users cannot overwrite existing schemas")
 
-    system = """You are a JSON Schema generator. The user will describe what fields
-they want to extract from a document. Generate a valid JSON Schema with:
-- "type": "object"
-- "properties": { ... } with each field having "type" and "description"
-- Supported types: string, number, array, object
+    system = """You are a JSON Schema generator for document data extraction.
+The user will describe fields they want extracted — often casually or with abbreviations.
 
-Use snake_case for field names. For dates, use type "string" with a
-description noting YYYY-MM-DD format. For arrays of objects, nest
-the item schema properly.
+Your job: interpret their intent and generate a valid JSON Schema.
+
+Common abbreviations to expand:
+- "org" → organization_name, "co" / "company" → company_name
+- "web" / "url" → website, "email" / "mail" → email_address
+- "phone" / "tel" → phone_number, "addr" / "address" → full_address
+- "amt" / "amount" → amount, "qty" → quantity, "desc" → description
+- "rev" → revenue, "yr" → year, "qtr" → quarter
+- "dept" → department, "mgr" → manager, "emp" → employee
+
+Schema rules:
+- "type": "object" with "properties": { ... }
+- Each field has "type" and "description"
+- Supported types: string, number, array, object
+- Use snake_case for field names
+- For dates, use type "string" with description noting YYYY-MM-DD format
+- For currency/money, use type "number"
+- For arrays of objects (like line items), nest the item schema properly
+- Add a clear description for each field so the extraction model knows what to look for
+
+If the user's description is vague, make reasonable assumptions about
+what fields would be useful for that document type.
 
 Return ONLY the JSON Schema — no markdown fences, no explanation."""
 
@@ -963,7 +979,6 @@ async def upload_document(
 
 @app.post("/api/documents/correct")
 async def save_document_corrections(
-    background_tasks: BackgroundTasks,
     project_id: str = Form(default=""),
     source_file: str = Form(...),
     doc_type: str = Form(...),
@@ -997,10 +1012,11 @@ async def save_document_corrections(
     except Exception:
         pass
 
-    # Start optimization in background
+    # Start optimization in background (fire and forget)
     project = db.get_project(project_id) if project_id else None
     slug = project.slug if project else doc_type
-    background_tasks.add_task(_start_optimization_bg, ctx.org_id, project_id, slug)
+    import asyncio
+    asyncio.ensure_future(_start_optimization_bg(ctx.org_id, project_id, slug))
 
     return {"status": "saved", "optimization_started": True}
 
