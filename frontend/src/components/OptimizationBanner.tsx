@@ -9,15 +9,47 @@ interface OptimizationBannerProps {
 }
 
 export default function OptimizationBanner({ api, projectId, onComplete, onGoToChat }: OptimizationBannerProps) {
-  const { displayedAccuracy, isOptimizing, isComplete, error } = useOptimizationStatus(api, true, projectId);
+  const { run, displayedAccuracy, isOptimizing, isComplete, error, refetch } = useOptimizationStatus(api, true, projectId);
 
-  // Error state
-  if (error) {
+  const status = run?.status || 'pending';
+
+  // Failed state — show retry
+  if (status === 'failed' || error) {
     return (
-      <div className="sticky top-0 z-40 bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-5">
-        <div className="flex items-center gap-3">
-          <div className="w-2 h-2 rounded-full bg-red-400" />
-          <p className="text-[0.8125rem] text-red-400">{error}</p>
+      <div className="bg-red-500/[0.06] border border-red-500/20 rounded-lg p-5 mb-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-2.5 h-2.5 rounded-full bg-red-400" />
+            <div>
+              <p className="text-[0.8125rem] font-medium text-red-400">
+                Optimization encountered an issue
+              </p>
+              <p className="text-[0.6875rem] text-mid mt-0.5">
+                {error || 'The optimization run failed. Your corrections have been saved — you can retry or continue.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={async () => {
+                try {
+                  await api.startBackgroundOptimization(projectId);
+                  refetch();
+                } catch {}
+              }}
+              className="px-4 py-2 text-xs font-medium bg-coral/20 text-coral rounded-md
+                         hover:bg-coral/30 transition-colors"
+            >
+              Retry
+            </button>
+            <button
+              onClick={onComplete}
+              className="px-4 py-2 text-xs font-medium bg-transparent border border-border-strong text-mid rounded-md
+                         hover:bg-white/[0.04] transition-colors"
+            >
+              Continue Anyway
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -26,7 +58,7 @@ export default function OptimizationBanner({ api, projectId, onComplete, onGoToC
   // Optimizing state
   if (isOptimizing) {
     return (
-      <div className="sticky top-0 z-40 bg-coral/[0.08] border border-coral/20 rounded-lg p-5 mb-5">
+      <div className="bg-coral/[0.06] border border-coral/20 rounded-lg p-5 mb-5">
         <div className="flex items-center gap-3">
           <div className="w-2.5 h-2.5 rounded-full bg-coral animate-pulse" />
           <div>
@@ -48,19 +80,19 @@ export default function OptimizationBanner({ api, projectId, onComplete, onGoToC
   // Complete state
   if (isComplete) {
     return (
-      <div className="sticky top-0 z-40 bg-sage-bg border border-sage/20 rounded-lg p-5 mb-5">
+      <div className="bg-sage-bg border border-sage/20 rounded-lg p-5 mb-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-2.5 h-2.5 rounded-full bg-sage" />
             <div>
               <p className="text-[0.8125rem] font-medium text-sage">
-                Extraction optimized!
+                Corrections saved!
                 {displayedAccuracy > 0 && (
                   <span className="ml-2">{displayedAccuracy.toFixed(1)}% accuracy</span>
                 )}
               </p>
               <p className="text-[0.6875rem] text-mid mt-0.5">
-                Your data is ready in Chat.
+                Your data is ready. Talk to it in Chat or upload more documents.
               </p>
             </div>
           </div>
@@ -77,7 +109,7 @@ export default function OptimizationBanner({ api, projectId, onComplete, onGoToC
               className="px-4 py-2 text-xs font-medium bg-transparent border border-border-strong text-mid rounded-md
                          hover:bg-white/[0.04] transition-colors"
             >
-              Continue
+              Upload Another
             </button>
           </div>
         </div>
@@ -85,5 +117,13 @@ export default function OptimizationBanner({ api, projectId, onComplete, onGoToC
     );
   }
 
-  return null;
+  // Loading / pending state (before first fetch completes)
+  return (
+    <div className="bg-coral/[0.04] border border-border-strong rounded-lg p-5 mb-5">
+      <div className="flex items-center gap-3">
+        <div className="w-2.5 h-2.5 rounded-full bg-coral/50 animate-pulse" />
+        <p className="text-[0.8125rem] text-mid">Processing corrections...</p>
+      </div>
+    </div>
+  );
 }
