@@ -290,8 +290,12 @@ def get_project_by_slug(org_id: str, slug: str) -> Project | None:
 
 
 def delete_project(project_id: str) -> None:
-    """Delete a project and all its members."""
+    """Delete a project and all related data."""
     conn = _get_conn()
+    # Delete child records first (foreign key constraints)
+    conn.execute("DELETE FROM project_extraction_versions WHERE project_id = ?", (project_id,))
+    conn.execute("DELETE FROM project_extraction_code WHERE project_id = ?", (project_id,))
+    conn.execute("DELETE FROM wiggum_runs WHERE project_id = ?", (project_id,))
     conn.execute("DELETE FROM project_members WHERE project_id = ?", (project_id,))
     conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
     conn.commit()
